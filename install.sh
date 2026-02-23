@@ -67,13 +67,15 @@ echo "  (Linux/Rocky에서 .bashrc 환경변수는 MCP 프로세스에 전달되
 echo ""
 
 # 현재 환경변수에 있으면 기본값으로 사용, 없으면 입력 요청
+# 주의: 프롬프트는 반드시 >&2 (stderr)로 출력해야 함
+#       stdout은 값만 출력해야 $() 캡처 시 오염되지 않음
 collect_key() {
   local varname="$1"
   local current="${!varname:-}"
   local prompt_url="$2"
 
   if [[ -n "$current" ]]; then
-    echo -n "  $varname [현재 환경변수 사용: ${current:0:6}...]: "
+    echo -n "  $varname [현재 환경변수 사용: ${current:0:6}...]: " >&2
     read -r input
     if [[ -z "$input" ]]; then
       echo "$current"
@@ -81,8 +83,8 @@ collect_key() {
       echo "$input"
     fi
   else
-    echo "  $varname 없음 → $prompt_url"
-    echo -n "  입력 (엔터=건너뜀): "
+    echo "  $varname 없음 → $prompt_url" >&2
+    echo -n "  입력 (엔터=건너뜀): " >&2
     read -r input
     echo "${input:-}"
   fi
@@ -133,11 +135,14 @@ SETTINGS="$CLAUDE_DIR/settings.json"
 
 MCP_NODE_PATH="$(normalize_path "$MCP_DIR")"
 SETTINGS_WIN="$(normalize_path "$SETTINGS")"
+# nvm 등 PATH 비표준 환경 대비: node 전체 경로 사용
+NODE_BIN="$(command -v node)"
+NODE_BIN_WIN="$(normalize_path "$NODE_BIN")"
 
-python3 - "$SETTINGS_WIN" "$MCP_NODE_PATH" "$GEMINI_KEY" "$GLM_KEY" <<'PYEOF'
+python3 - "$SETTINGS_WIN" "$MCP_NODE_PATH" "$GEMINI_KEY" "$GLM_KEY" "$NODE_BIN_WIN" <<'PYEOF'
 import json, os, sys
 
-settings_path, mcp_path, gemini_key, glm_key = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
+settings_path, mcp_path, gemini_key, glm_key, node_bin = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4], sys.argv[5]
 
 try:
     with open(settings_path, 'r', encoding='utf-8') as f:
@@ -181,7 +186,7 @@ for k, v in existing_env.items():
 
 mcp_entry = {
     "type": "stdio",
-    "command": "node",
+    "command": node_bin,   # 전체 경로 사용 (nvm 등 PATH 비표준 환경 대비)
     "args": [f"{mcp_path}/index.js"]
 }
 if mcp_env:
