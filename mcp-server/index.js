@@ -227,28 +227,15 @@ async function getValidAccessToken() {
   }
 
   const { exp: expiry, scopes, clientId } = getJwtInfo(accessToken);
-
-  // ChatGPT OAuth 토큰은 api.responses.write 스코프 필요
-  // (refresh로는 이 스코프를 얻을 수 없음 — OpenAI 플랫폼 제한)
-  if (!scopes.includes("api.responses.write")) {
-    throw new Error(
-      `auth.json ChatGPT 토큰에 api.responses.write 스코프가 없습니다.\n` +
-      `OPENAI_API_KEY(sk-...) 설정을 권장합니다:\n` +
-      `  install.sh 재실행 시 OPENAI_API_KEY 입력\n` +
-      `  또는: claude mcp add --scope user multi-model-agent -e OPENAI_API_KEY=sk-... ...\n` +
-      `${SCOPE_RE_LOGIN_MSG}`
-    );
-  }
-
+  // OAuth 전용(api.responses.write 스코프 없음) 시 Chat Completions API 폴백 사용
+  const isOAuthOnly = !scopes.includes("api.responses.write");
   const isExpired = expiry > 0 && Date.now() / 1000 > expiry - 60;
-  if (!isExpired) return accessToken;
-
+  if (!isExpired) return { token: accessToken, isOAuthOnly };
   if (!refreshToken) {
     throw new Error(
       "토큰이 만료되었고 refresh_token이 없습니다. `codex login`으로 재인증하세요."
     );
   }
-
   if (!refreshPromise) {
     refreshPromise = doRefreshToken(refreshToken, clientId)
       .then((refreshed) => {
@@ -263,12 +250,8 @@ async function getValidAccessToken() {
           last_refresh: new Date().toISOString(),
         };
         writeFileSync(CODEX_AUTH_PATH, JSON.stringify(newAuth, null, 2));
-        if (!newScopes.includes("api.responses.write")) {
-          throw new Error(
-            `토큰 갱신 후 api.responses.write 스코프 소실.\n${SCOPE_RE_LOGIN_MSG}`
-          );
-        }
-        return refreshed.access_token;
+        const refreshedIsOAuthOnly = !newScopes.includes("api.responses.write");
+        return { token: refreshed.access_token, isOAuthOnly: refreshedIsOAuthOnly };
       })
       .finally(() => { refreshPromise = null; });
   }
@@ -291,16 +274,56 @@ async function callGpt(
   maxTokens = null,
   logExtra = {}
 ) {
-  const token = await getValidAccessToken();
+  const { token, isOAuthOnly } = await getValidAccessToken();
+
+  // OAuth 전용 토큰(api.responses.write 스코프 없음) 시 Chat Completions API로 폴백
+  if (isOAuthOnly) {
+    const chatModel = model.includes("codex") ? "gpt-4o" : model;
+    const messages = [];
+    if (systemPrompt) messages.push({ role: "system", content: systemPrompt });
+    messages.push({ role: "user", content: prompt });
+    const chatBody = { model: chatModel, messages };
+    if (maxTokens) chatBody.max_tokens = maxTokens;
+
+    const { res: chatRes, retryCount: chatRetry } = await fetchWithRetry(
+      "https://api.openai.com/v1/chat/completions",
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(chatBody),
+      }
+    );
+
+    if (!chatRes.ok) {
+      const errText = await chatRes.text();
+      if (chatRes.status === 429) {
+        throw new Error(
+          `GPT API 크레딧 부족 (HTTP 429). OpenAI API 키 발급: platform.openai.com/settings/billing`
+        );
+      }
+      throw new Error(`GPT Chat API 오류 (HTTP ${chatRes.status}): ${errText}`);
+    }
+
+    const chatData = await chatRes.json();
+    const chatUsage = chatData.usage ?? {};
+    logUsage(chatModel, chatUsage.prompt_tokens ?? 0, chatUsage.completion_tokens ?? 0, {
+      retry_count: chatRetry,
+      routing: "chat_completions_fallback",
+      ...logExtra,
+    });
+    return chatData.choices?.[0]?.message?.content ?? "[GPT 응답 없음]";
+  }
 
   const input = [];
+  // Responses API (정상 경로)
   if (systemPrompt) input.push({ role: "system", content: systemPrompt });
   input.push({ role: "user", content: prompt });
-
   const body = { model, input };
   if (reasoningEffort !== "none") body.reasoning = { effort: reasoningEffort };
   if (maxTokens) body.max_output_tokens = maxTokens;
-
   const { res, retryCount } = await fetchWithRetry("https://api.openai.com/v1/responses", {
     method: "POST",
     headers: {
@@ -309,12 +332,10 @@ async function callGpt(
     },
     body: JSON.stringify(body),
   });
-
   if (!res.ok) {
     const err = await res.text();
     throw new Error(`GPT API 오류 (HTTP ${res.status}): ${err}`);
   }
-
   const data = await res.json();
   const usage = data.usage ?? {};
   logUsage(model, usage.input_tokens ?? 0, usage.output_tokens ?? 0, {
@@ -323,7 +344,6 @@ async function callGpt(
     retry_count: retryCount,
     ...logExtra,
   });
-
   const texts = [];
   for (const item of data.output ?? []) {
     if (item.type === "message") {
@@ -332,13 +352,11 @@ async function callGpt(
       }
     }
   }
-
   if (texts.length === 0) {
     return `[응답 파싱 실패] raw: ${JSON.stringify(data.output ?? data).slice(0, 500)}`;
   }
   return texts.join("\n");
 }
-
 // ───────────────────────────────────────────────
 // callGemini — OpenAI 호환 Chat Completions
 // ───────────────────────────────────────────────
