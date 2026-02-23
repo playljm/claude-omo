@@ -14,7 +14,7 @@ Linux(Ubuntu / Rocky) 서버에서 반복적으로 발생하는 문제와 해결
 | `~/.codex/auth.json 파일이 없습니다` | codex login 미실행 | [→ GPT auth.json 복사](#2-gpt-authon-없음) |
 | `access_token이 없습니다` | auth.json 구조 불완전 | [→ auth.json 구조 확인](#3-gpt-토큰-구조-불완전) |
 | `토큰이 만료되었고 refresh_token이 없습니다` | 오래된 auth.json | [→ auth.json 재복사](#4-gpt-토큰-만료) |
-| `api.responses.write 스코프가 없습니다` | ChatGPT OAuth 한계 | [→ OPENAI_API_KEY 설정](#8-gpt-apiresponseswrite-스코프-없음) |
+| `api.responses.write 스코프가 없습니다` | ChatGPT OAuth 한계 (이미 자동 해결됨) | [→ Codex 백엔드 자동 사용](#8-gpt--chatgpt-oauth-codex-백엔드-자동-처리) |
 | `SessionEnd IndexError` | settings.json 빈 배열 | install.sh 재실행 |
 | `settings.json 경로 오류` | Windows Git Bash 경로 | install.sh 재실행 |
 | `도구를 찾을 수 없습니다` | claude mcp add 미실행 | [→ MCP 미등록](#5-설치-후-mcp가-등록-안-됨-가장-흔한-문제) |
@@ -331,47 +331,67 @@ print('SessionEnd hook:', '✅' if sess else '❌')
 
 ---
 
-## 8. GPT — api.responses.write 스코프 없음
+## 8. GPT — ChatGPT OAuth Codex 백엔드 자동 처리
 
-### 증상
+### v4.1 이후: 스코프 없어도 자동으로 동작합니다
+
+**이전 버전**에서는 `api.responses.write` 스코프 없음 → Chat Completions 폴백 → HTTP 429 크레딧 부족 실패 체인이 발생했음.
+
+**v4.1 수정 후**: `isOAuthOnly = true` 감지 시 `chatgpt.com/backend-api/codex/responses` 엔드포인트를 직접 사용.
+ChatGPT Pro 구독 OAuth 토큰으로 GPT-5.3-Codex를 정상 호출합니다.
+
+### 작동 원리
+
 ```
-auth.json 토큰에 api.responses.write 스코프가 없습니다.
-```
-또는:
-```
-GPT API 오류 (HTTP 401): Missing scopes: api.responses.write
+JWT 스코프 확인 → api.responses.write 없음 → isOAuthOnly = true
+   ↓
+JWT에서 https://api.openai.com/auth 클레임 추출 → chatgpt_account_id 획득
+   ↓
+POST https://chatgpt.com/backend-api/codex/responses
+Headers:
+  Authorization: Bearer <access_token>
+  chatgpt-account-id: <chatgpt_account_id>
+  OpenAI-Beta: responses=experimental
+  originator: codex_cli_rs
+Body: { model, instructions, store: false, stream: true, input: [...] }
+   ↓
+SSE 파싱 → response.completed 이벤트 → output_text 추출
 ```
 
-### 원인
-ChatGPT OAuth (`codex login`) 토큰은 `api.responses.write` 스코프를 포함하지 않음.
-ChatGPT Pro 구독과 OpenAI 플랫폼 API 권한은 별개 과금 체계이기 때문.
-**`codex login`을 재실행해도 이 스코프는 얻을 수 없음** — 근본 제한.
+### 여전히 실패하는 경우
 
-### 해결법 (권장)
+**증상:**
+```
+ChatGPT account_id를 JWT에서 추출할 수 없습니다.
+```
+
+**해결법:** `codex login` 재실행 (Windows에서)
 ```bash
-# 1. platform.openai.com에서 API 키 발급 (sk-proj-... 형식)
-#    billing에 크레딧 추가 필요
+# Windows에서
+codex login   # 브라우저 재인증
 
-# 2. install.sh 재실행 시 OPENAI_API_KEY 입력
-bash ~/claude-omo/install.sh   # OPENAI_API_KEY 프롬프트에서 입력
-
-# 또는 직접 등록:
-NODE_BIN=$(command -v node)
-MCP_DIR=~/mcp-servers/multi-model
-claude mcp remove multi-model-agent 2>/dev/null || true
-claude mcp add --scope user multi-model-agent \
-  -e "OPENAI_API_KEY=sk-proj-..." \
-  -e "GEMINI_API_KEY=기존키" \
-  -e "GLM_API_KEY=기존키" \
-  -- "$NODE_BIN" "$MCP_DIR/index.js"
+# 서버로 재복사
+scp ~/.codex/auth.json root@<서버IP>:~/.codex/auth.json
 ```
 
-### OPENAI_API_KEY vs ChatGPT OAuth 비교
+**증상:**
+```
+GPT Codex backend 오류 (HTTP 403 또는 HTTP 401)
+```
 
-| 방식 | 장점 | 단점 |
-|------|------|------|
-| OPENAI_API_KEY | 안정적, 스코프 문제 없음 | 별도 과금 필요 |
-| ChatGPT OAuth | ChatGPT Pro 포함 | api.responses.write 미포함 |
+**해결법:** ChatGPT Plus/Pro 구독 상태 확인. 구독이 활성 상태여야 Codex 백엔드 접근 가능.
+
+### OPENAI_API_KEY가 있으면 우선 사용됩니다
+
+| 우선순위 | 방식 | 엔드포인트 |
+|----------|------|-----------|
+| 1순위 | OPENAI_API_KEY 환경변수 | api.openai.com/v1/responses |
+| 2순위 | auth.json의 OPENAI_API_KEY | api.openai.com/v1/responses |
+| 3순위 | ChatGPT OAuth (자동) | chatgpt.com/backend-api/codex/responses |
+```bash
+# OPENAI_API_KEY를 명시적으로 설정하고 싶을 때:
+bash ~/claude-omo/install.sh   # OPENAI_API_KEY 프롬프트에서 입력
+```
 
 ---
 

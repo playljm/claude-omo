@@ -176,6 +176,18 @@ function getJwtInfo(token) {
   }
 }
 
+// ChatGPT JWT에서 https://api.openai.com/auth 클레임 추출 (account_id 등)
+function getJwtAuthClaim(token) {
+  try {
+    const payload = token.split(".")[1];
+    const padded = payload + "=".repeat((4 - (payload.length % 4)) % 4);
+    const decoded = JSON.parse(Buffer.from(padded, "base64").toString("utf8"));
+    return decoded["https://api.openai.com/auth"] ?? null;
+  } catch {
+    return null;
+  }
+}
+
 const SCOPE_RE_LOGIN_MSG =
   "Windows에서 `codex login` 실행 후 auth.json을 이 서버로 복사하세요:\n" +
   "  scp ~/.codex/auth.json root@<서버IP>:~/.codex/auth.json\n" +
@@ -276,45 +288,89 @@ async function callGpt(
 ) {
   const { token, isOAuthOnly } = await getValidAccessToken();
 
-  // OAuth 전용 토큰(api.responses.write 스코프 없음) 시 Chat Completions API로 폴백
+  // OAuth 전용 토큰: chatgpt.com/backend-api/codex/responses 사용
+  // (api.responses.write 스코프 없는 ChatGPT Plus/Pro OAuth 토큰용)
   if (isOAuthOnly) {
-    const chatModel = model.includes("codex") ? "gpt-4o" : model;
-    const messages = [];
-    if (systemPrompt) messages.push({ role: "system", content: systemPrompt });
-    messages.push({ role: "user", content: prompt });
-    const chatBody = { model: chatModel, messages };
-    if (maxTokens) chatBody.max_tokens = maxTokens;
+    const authClaim = getJwtAuthClaim(token);
+    const accountId = authClaim?.chatgpt_account_id;
+    if (!accountId) {
+      throw new Error(
+        "ChatGPT account_id를 JWT에서 추출할 수 없습니다. `codex login`으로 재인증하세요."
+      );
+    }
 
-    const { res: chatRes, retryCount: chatRetry } = await fetchWithRetry(
-      "https://api.openai.com/v1/chat/completions",
+    const instructions = systemPrompt || "You are a helpful coding assistant.";
+    const codexBody = {
+      model, instructions, store: false, stream: true,
+      input: [{ role: "user", content: prompt }],
+    };
+    if (reasoningEffort !== "none") codexBody.reasoning = { effort: reasoningEffort };
+    if (maxTokens) codexBody.max_output_tokens = maxTokens;
+
+    const { res: codexRes, retryCount: codexRetry } = await fetchWithRetry(
+      "https://chatgpt.com/backend-api/codex/responses",
       {
         method: "POST",
         headers: {
           Authorization: `Bearer ${token}`,
           "Content-Type": "application/json",
+          "chatgpt-account-id": accountId,
+          "OpenAI-Beta": "responses=experimental",
+          originator: "codex_cli_rs",
         },
-        body: JSON.stringify(chatBody),
+        body: JSON.stringify(codexBody),
       }
     );
 
-    if (!chatRes.ok) {
-      const errText = await chatRes.text();
-      if (chatRes.status === 429) {
-        throw new Error(
-          `GPT API 크레딧 부족 (HTTP 429). OpenAI API 키 발급: platform.openai.com/settings/billing`
-        );
-      }
-      throw new Error(`GPT Chat API 오류 (HTTP ${chatRes.status}): ${errText}`);
+    if (!codexRes.ok) {
+      const errText = await codexRes.text();
+      throw new Error(
+        `GPT Codex backend 오류 (HTTP ${codexRes.status}): ${errText.substring(0, 300)}\n` +
+        `※ 이 오류가 계속되면 OPENAI_API_KEY를 platform.openai.com에서 발급하세요.`
+      );
     }
 
-    const chatData = await chatRes.json();
-    const chatUsage = chatData.usage ?? {};
-    logUsage(chatModel, chatUsage.prompt_tokens ?? 0, chatUsage.completion_tokens ?? 0, {
-      retry_count: chatRetry,
-      routing: "chat_completions_fallback",
-      ...logExtra,
-    });
-    return chatData.choices?.[0]?.message?.content ?? "[GPT 응답 없음]";
+    // SSE → 텍스트 파싱
+    const sseText = await codexRes.text();
+    const sseLines = sseText.split("\n");
+    let completedResponse = null;
+    for (let i = 0; i < sseLines.length; i++) {
+      if (sseLines[i].startsWith("event: response.completed")) {
+        const dataLine = sseLines[i + 1];
+        if (dataLine?.startsWith("data: ")) {
+          try { completedResponse = JSON.parse(dataLine.slice(6)); } catch { /* skip */ }
+        }
+      }
+    }
+
+    if (completedResponse) {
+      const usage = completedResponse.response?.usage ?? {};
+      logUsage(model, usage.input_tokens ?? 0, usage.output_tokens ?? 0, {
+        retry_count: codexRetry, routing: "chatgpt_codex_backend", ...logExtra,
+      });
+      const texts = [];
+      for (const item of completedResponse.response?.output ?? []) {
+        if (item.type === "message") {
+          for (const block of item.content ?? []) {
+            if (block.type === "output_text" && block.text) texts.push(block.text);
+          }
+        }
+      }
+      if (texts.length > 0) return texts.join("\n");
+    }
+
+    // fallback: delta 조합
+    const deltas = [];
+    for (let i = 0; i < sseLines.length; i++) {
+      if (sseLines[i].startsWith("event: response.output_text.delta")) {
+        const dataLine = sseLines[i + 1];
+        if (dataLine?.startsWith("data: ")) {
+          try { const d = JSON.parse(dataLine.slice(6)); if (d.delta) deltas.push(d.delta); } catch { /* skip */ }
+        }
+      }
+    }
+    if (deltas.length > 0) return deltas.join("");
+    return "[GPT Codex backend: 응답 파싱 실패]";
   }
 
   const input = [];
