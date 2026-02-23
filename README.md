@@ -7,71 +7,129 @@ OMO의 핵심 에이전트 패턴(Sisyphus, Oracle, Explore 등)을 Claude Code 
 
 ---
 
+## 설치 (원클릭)
+
+```bash
+git clone https://github.com/playljm/claude-omo
+cd claude-omo
+bash install.sh
+```
+
+설치 스크립트가 다음을 자동 처리합니다:
+- MCP 서버 설치 (`~/mcp-servers/multi-model/`)
+- 에이전트 7개 + 커맨드 복사 (`~/.claude/`)
+- CLAUDE.md 설치 (`~/.claude/CLAUDE.md`)
+- settings.json 훅 + MCP 등록
+- **API 키를 settings.json env에 직접 주입** (Linux MCP 전달 문제 해결)
+- GPT auth.json 상태 확인 및 안내
+
+이미 설치한 경우 업데이트:
+```bash
+cd ~/claude-omo && git pull && bash install.sh
+```
+
+---
+
+## 필요 환경
+
+| 항목 | 내용 |
+|------|------|
+| Claude Code CLI | `npm install -g @anthropic-ai/claude-code` |
+| Node.js | 18 이상 |
+| GEMINI_API_KEY | [AI Studio](https://aistudio.google.com/apikey) 발급 |
+| GLM_API_KEY | [Z.ai](https://open.bigmodel.cn) 발급 |
+| GPT 인증 | `~/.codex/auth.json` (아래 참고) |
+
+> **⚠️ Linux 서버 주의**: `export KEY=...` (.bashrc)는 Claude Code MCP 프로세스에 전달되지 않습니다.
+> `install.sh`가 API 키를 `settings.json`의 `mcpServers.env`에 직접 주입합니다.
+
+---
+
+## GPT 인증 — 서버(브라우저 없는 환경)
+
+GPT는 OAuth 방식(`~/.codex/auth.json`)을 사용합니다.
+브라우저가 없는 서버에서는 다른 머신에서 파일을 복사합니다.
+
+```bash
+# Windows/Mac에서 codex login 완료 후 서버로 복사
+scp ~/.codex/auth.json root@<서버IP>:~/.codex/auth.json
+
+# 또는 install.sh 실행 중 붙여넣기 옵션 선택
+```
+
+auth.json 구조:
+```json
+{
+  "auth_mode": "chatgpt",
+  "tokens": {
+    "access_token": "...",
+    "refresh_token": "..."
+  }
+}
+```
+
+`refresh_token`이 있으면 만료 시 자동 갱신됩니다.
+
+---
+
+## 모델별 인증 방식
+
+| 모델 | 모델명 | 인증 | 설정 위치 |
+|------|--------|------|-----------|
+| GPT | `gpt-5.3-codex` | OAuth JWT | `~/.codex/auth.json` |
+| Gemini | `gemini-2.5-pro` | API Key | `settings.json mcpServers.env` |
+| GLM | `glm-5` | API Key | `settings.json mcpServers.env` |
+
+---
+
+## 상태 확인
+
+```bash
+python3 -c "
+import json
+s = json.load(open('$HOME/.claude/settings.json'))
+env = s.get('mcpServers',{}).get('multi-model-agent',{}).get('env',{})
+print('GEMINI_API_KEY:', '✅' if env.get('GEMINI_API_KEY') else '❌ 없음')
+print('GLM_API_KEY:   ', '✅' if env.get('GLM_API_KEY') else '❌ 없음')
+"
+
+# GPT auth
+python3 -c "
+import json
+d = json.load(open('$HOME/.codex/auth.json'))
+t = d.get('tokens', d)
+print('access_token: ', '✅' if t.get('access_token') else '❌')
+print('refresh_token:', '✅' if t.get('refresh_token') else '❌ (만료 시 재로그인 필요)')
+" 2>/dev/null || echo "auth.json 없음 — GPT 사용 불가"
+```
+
+문제가 있으면 → **[TROUBLESHOOT.md](./TROUBLESHOOT.md)**
+
+---
+
 ## 구조
 
 ```
 claude-omo/
+├── install.sh           # 원클릭 설치 스크립트
+├── TROUBLESHOOT.md      # Linux 서버 문제 해결 가이드
 ├── mcp-server/          # Multi-Model MCP 서버 v4.0
-│   ├── index.js         # smart_route, ask_parallel, fetchWithRetry 포함
+│   ├── index.js         # smart_route, ask_parallel, fetchWithRetry
 │   ├── ulw-detector.js  # ULW 모드 훅 (UserPromptSubmit)
-│   └── session-summary.js # 세션 종료 시 사용량 요약
-├── agents/              # .claude/agents/ 에 복사
+│   └── session-summary.js
+├── agents/              # ~/.claude/agents/ 에 복사
 │   ├── sisyphus.md      # 멀티에이전트 오케스트레이터 (ULW)
 │   ├── oracle.md        # GPT high, 아키텍처 컨설턴트 (읽기전용)
 │   ├── researcher.md    # Gemini, 대규모 코드 분석 (읽기전용)
 │   ├── worker.md        # GLM + 구현 도구
 │   ├── reviewer.md      # ask_parallel 코드 리뷰 (읽기전용)
+│   ├── debugger.md      # GPT high, 난해한 버그 진단 (읽기전용)
 │   └── explore.md       # Haiku, 빠른 파일 검색 (읽기전용)
-├── commands/            # .claude/commands/ 에 복사
+├── commands/            # ~/.claude/commands/ 에 복사
 │   ├── plan.md          # /plan — Prometheus 인터뷰 기반 계획
 │   ├── route.md         # /route — smart_route 바로가기
 │   └── compare.md       # /compare — ask_parallel 3모델 비교
 └── CLAUDE.md            # ~/.claude/CLAUDE.md 라우팅 규칙
-```
-
----
-
-## 설치
-
-### 1. MCP 서버
-
-```bash
-cp -r mcp-server/ ~/mcp-servers/multi-model/
-cd ~/mcp-servers/multi-model && npm install
-```
-
-### 2. 에이전트 & 커맨드
-
-```bash
-cp agents/*.md /path/to/project/.claude/agents/
-cp commands/*.md /path/to/project/.claude/commands/
-```
-
-### 3. CLAUDE.md
-
-```bash
-cp CLAUDE.md ~/.claude/CLAUDE.md
-```
-
-### 4. settings.json 훅 등록
-
-`~/.claude/settings.json`의 `hooks` 섹션에 추가:
-
-```json
-"hooks": {
-  "UserPromptSubmit": [{
-    "hooks": [{
-      "type": "command",
-      "command": "node ~/mcp-servers/multi-model/ulw-detector.js 2>/dev/null || true"
-    }]
-  }],
-  "SessionEnd": [{
-    "hooks": [{
-      "type": "command",
-      "command": "node ~/mcp-servers/multi-model/session-summary.js 2>/dev/null || true"
-    }]
-  }]
-}
 ```
 
 ---
@@ -98,7 +156,7 @@ cp CLAUDE.md ~/.claude/CLAUDE.md
 | 에이전트 | 역할 | 모델 |
 |----------|------|------|
 | `sisyphus` | 멀티에이전트 오케스트레이터 | Sonnet |
-| `oracle` | 아키텍처 컨설턴트 (읽기전용) | **Opus 4.6** |
+| `oracle` | 아키텍처 컨설턴트 (읽기전용) | Opus 4.6 |
 | `debugger` | 난해한 버그 진단 (읽기전용) | GPT high |
 | `researcher` | 대규모 코드 분석 | Gemini |
 | `worker` | CRUD/보일러플레이트 구현 | GLM |
@@ -145,13 +203,3 @@ cp CLAUDE.md ~/.claude/CLAUDE.md
 | Prometheus (계획) | `/plan` 커맨드 |
 | Intent Gate + Categories | `smart_route` MCP 도구 |
 | ask_parallel | `ask_parallel` MCP 도구 |
-
----
-
-## 필요 환경
-
-- Claude Code CLI
-- Node.js 18+
-- `GEMINI_API_KEY` 환경변수 (AI Studio)
-- `GLM_API_KEY` 환경변수 (Z.ai)
-- `codex login` 완료 (GPT OAuth)
