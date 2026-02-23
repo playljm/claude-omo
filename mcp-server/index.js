@@ -160,22 +160,33 @@ function readAuthJson() {
   }
 }
 
-function getJwtExpiry(token) {
+function getJwtInfo(token) {
   try {
     const payload = token.split(".")[1];
     const padded = payload + "=".repeat((4 - (payload.length % 4)) % 4);
     const decoded = JSON.parse(Buffer.from(padded, "base64").toString("utf8"));
-    return decoded.exp ?? 0;
+    return {
+      exp: decoded.exp ?? 0,
+      scopes: decoded.scp ?? decoded.scope ?? [],
+      clientId: decoded.client_id ?? null,
+    };
   } catch {
-    return 0;
+    return { exp: 0, scopes: [], clientId: null };
   }
 }
 
-async function doRefreshToken(refreshToken) {
+const SCOPE_RE_LOGIN_MSG =
+  "Windows에서 `codex login` 실행 후 auth.json을 이 서버로 복사하세요:\n" +
+  "  scp ~/.codex/auth.json root@<서버IP>:~/.codex/auth.json\n" +
+  "※ OpenAI refresh grant가 api.responses.write 스코프를 유지하지 않는 제한입니다.";
+
+async function doRefreshToken(refreshToken, clientId) {
+  const body = { grant_type: "refresh_token", refresh_token: refreshToken };
+  if (clientId) body.client_id = clientId;
   const res = await fetch(TOKEN_REFRESH_URL, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ grant_type: "refresh_token", refresh_token: refreshToken }),
+    body: JSON.stringify(body),
   });
   if (!res.ok) {
     const err = await res.text();
@@ -200,7 +211,16 @@ async function getValidAccessToken() {
     throw new Error("access_token이 없습니다. `codex login`으로 재인증이 필요합니다.");
   }
 
-  const expiry = getJwtExpiry(accessToken);
+  const { exp: expiry, scopes, clientId } = getJwtInfo(accessToken);
+
+  // 스코프 체크 — 만료 여부와 무관하게 api.responses.write 없으면 즉시 실패
+  // (refresh로는 이 스코프를 얻을 수 없음 → 재로그인 필요)
+  if (!scopes.includes("api.responses.write")) {
+    throw new Error(
+      `auth.json 토큰에 api.responses.write 스코프가 없습니다.\n${SCOPE_RE_LOGIN_MSG}`
+    );
+  }
+
   const isExpired = expiry > 0 && Date.now() / 1000 > expiry - 60;
 
   if (!isExpired) return accessToken;
@@ -212,8 +232,9 @@ async function getValidAccessToken() {
   }
 
   if (!refreshPromise) {
-    refreshPromise = doRefreshToken(refreshToken)
+    refreshPromise = doRefreshToken(refreshToken, clientId)
       .then((refreshed) => {
+        const { scopes: newScopes } = getJwtInfo(refreshed.access_token);
         const newAuth = {
           ...auth,
           tokens: {
@@ -224,6 +245,11 @@ async function getValidAccessToken() {
           last_refresh: new Date().toISOString(),
         };
         writeFileSync(CODEX_AUTH_PATH, JSON.stringify(newAuth, null, 2));
+        if (!newScopes.includes("api.responses.write")) {
+          throw new Error(
+            `토큰 갱신 후 api.responses.write 스코프 소실.\n${SCOPE_RE_LOGIN_MSG}`
+          );
+        }
         return refreshed.access_token;
       })
       .finally(() => { refreshPromise = null; });
@@ -232,9 +258,7 @@ async function getValidAccessToken() {
   try {
     return await refreshPromise;
   } catch (e) {
-    throw new Error(
-      `액세스 토큰 갱신 실패: ${e.message}\n\`codex login\`을 다시 실행해 재인증하세요.`
-    );
+    throw new Error(`액세스 토큰 갱신 실패: ${e.message}`);
   }
 }
 
