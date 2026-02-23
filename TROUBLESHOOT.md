@@ -16,6 +16,8 @@ Linux(Ubuntu / Rocky) 서버에서 반복적으로 발생하는 문제와 해결
 | `토큰이 만료되었고 refresh_token이 없습니다` | 오래된 auth.json | [→ auth.json 재복사](#4-gpt-토큰-만료) |
 | `SessionEnd IndexError` | settings.json 빈 배열 | install.sh 재실행 |
 | `settings.json 경로 오류` | Windows Git Bash 경로 | install.sh 재실행 |
+| `도구를 찾을 수 없습니다` | claude mcp add 미실행 | [→ MCP 미등록](#5-설치-후-mcp가-등록-안-됨-가장-흔한-문제) |
+| `claude mcp list`에 없음 | settings.json 직접편집 한계 | [→ MCP 미등록](#5-설치-후-mcp가-등록-안-됨-가장-흔한-문제) |
 
 ---
 
@@ -188,28 +190,51 @@ scp ~/.codex/auth.json root@<서버IP>:~/.codex/auth.json
 
 ---
 
-## 5. 설치 후 MCP가 등록 안 됨
+## 5. 설치 후 MCP가 등록 안 됨 (가장 흔한 문제)
 
 ### 증상
-Claude Code에서 `ask_glm`, `ask_gpt` 등 도구를 찾을 수 없음.
+```
+/compare 안녕?
+● mcp__multi-model-agent__ask_parallel 도구를 찾을 수 없습니다.
+```
+또는 `claude mcp list`에서 `multi-model-agent`가 보이지 않음.
+
+### 원인
+`settings.json`의 `mcpServers` 직접 편집만으로는 Claude Code가 MCP를 인식하지 못하는 경우가 있음.
+반드시 `claude mcp add --scope user` CLI 명령으로 등록해야 `claude mcp list`에 표시되고 세션에서 도구가 활성화됨.
 
 ### 확인
 ```bash
-cat ~/.claude/settings.json | python3 -c "
-import json, sys
-s = json.load(sys.stdin)
-mcp = s.get('mcpServers', {})
-print('MCP 등록:', list(mcp.keys()))
-agent = mcp.get('multi-model-agent', {})
-print('args:', agent.get('args', []))
-print('env keys:', list(agent.get('env', {}).keys()))
-"
+claude mcp list
+# multi-model-agent 가 목록에 있어야 함
+
+claude mcp get multi-model-agent
+# "No MCP server found" → 미등록 상태
 ```
 
-### 해결법
+### 해결법 (권장)
 ```bash
-bash ~/claude-omo/install.sh   # 재실행
+cd ~/claude-omo && git pull && bash install.sh
 # Claude Code 완전 종료 후 재시작
+claude mcp list   # multi-model-agent 확인
+```
+
+### 해결법 (수동)
+```bash
+NODE_BIN=$(command -v node)
+MCP_DIR=~/mcp-servers/multi-model
+
+# 기존 등록 제거
+claude mcp remove multi-model-agent 2>/dev/null || true
+
+# 재등록 (API 키는 실제 값으로 교체)
+claude mcp add --scope user \
+  -e "GEMINI_API_KEY=실제키" \
+  -e "GLM_API_KEY=실제키" \
+  multi-model-agent -- "$NODE_BIN" "$MCP_DIR/index.js"
+
+# 확인
+claude mcp get multi-model-agent
 ```
 
 ---

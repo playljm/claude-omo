@@ -85,8 +85,15 @@ auth.json 구조:
 ## 상태 확인
 
 ```bash
+# MCP 등록 확인 (이게 비어있으면 /compare 등 동작 안 함)
+claude mcp list
+claude mcp get multi-model-agent
+
+# API 키 확인
 python3 -c "
-import json
+import json, subprocess, sys
+result = subprocess.run(['claude', 'mcp', 'get', 'multi-model-agent'], capture_output=True, text=True)
+print('MCP 등록:', '✅' if 'multi-model-agent' in result.stdout else '❌ 미등록')
 s = json.load(open('$HOME/.claude/settings.json'))
 env = s.get('mcpServers',{}).get('multi-model-agent',{}).get('env',{})
 print('GEMINI_API_KEY:', '✅' if env.get('GEMINI_API_KEY') else '❌ 없음')

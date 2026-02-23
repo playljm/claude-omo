@@ -127,8 +127,8 @@ fi
 cp "$REPO_DIR/CLAUDE.md" "$CLAUDE_DIR/CLAUDE.md"
 info "CLAUDE.md 복사 완료"
 
-# ─── 8. settings.json 업데이트 ─────────────────────────────
-step "settings.json 훅 + MCP 서버 등록 (API 키 env 주입 포함)"
+# ─── 8. settings.json 훅 등록 ──────────────────────────────
+step "settings.json 훅 등록"
 
 SETTINGS="$CLAUDE_DIR/settings.json"
 [[ ! -f "$SETTINGS" ]] && echo '{}' > "$SETTINGS"
@@ -139,10 +139,10 @@ SETTINGS_WIN="$(normalize_path "$SETTINGS")"
 NODE_BIN="$(command -v node)"
 NODE_BIN_WIN="$(normalize_path "$NODE_BIN")"
 
-python3 - "$SETTINGS_WIN" "$MCP_NODE_PATH" "$GEMINI_KEY" "$GLM_KEY" "$NODE_BIN_WIN" <<'PYEOF'
+python3 - "$SETTINGS_WIN" "$MCP_NODE_PATH" "$NODE_BIN_WIN" <<'PYEOF'
 import json, os, sys
 
-settings_path, mcp_path, gemini_key, glm_key, node_bin = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4], sys.argv[5]
+settings_path, mcp_path, node_bin = sys.argv[1], sys.argv[2], sys.argv[3]
 
 try:
     with open(settings_path, 'r', encoding='utf-8') as f:
@@ -165,13 +165,65 @@ def upsert_hook(hooks, event, cmd):
     if not any(script_name in c for c in existing):
         hook_list.append({"type": "command", "command": cmd})
 
-ulw_cmd  = f"node {mcp_path}/ulw-detector.js 2>/dev/null || true"
-sess_cmd = f"node {mcp_path}/session-summary.js 2>/dev/null || true"
+# node 전체 경로 사용 (nvm 환경에서 훅 실행 시 PATH 미계승 대비)
+ulw_cmd  = f"{node_bin} {mcp_path}/ulw-detector.js 2>/dev/null || true"
+sess_cmd = f"{node_bin} {mcp_path}/session-summary.js 2>/dev/null || true"
 
 upsert_hook(hooks, "UserPromptSubmit", ulw_cmd)
 upsert_hook(hooks, "SessionEnd", sess_cmd)
 
-# ── mcpServers (API 키 env 주입) ────────────────
+with open(settings_path, 'w', encoding='utf-8') as f:
+    json.dump(s, f, indent=2, ensure_ascii=False)
+
+print(f"  훅 등록: UserPromptSubmit (ulw-detector), SessionEnd (session-summary)")
+PYEOF
+info "settings.json 훅 등록 완료"
+
+# ─── 9. MCP 서버 등록 ──────────────────────────────────────
+# 핵심: settings.json 직접 편집으로는 Claude Code가 MCP를 인식 못하는 경우가 있음
+# → claude mcp add --scope user CLI를 통해 공식 등록해야 claude mcp list 에 표시되고
+#   세션에서 mcp__multi-model-agent__* 도구가 활성화됨
+step "MCP 서버 등록 (claude mcp add --scope user)"
+
+MCP_REGISTERED=false
+
+if command -v claude &>/dev/null; then
+  # 기존 등록 제거 (오류 무시 — 없는 경우 포함)
+  claude mcp remove multi-model-agent 2>/dev/null || true
+
+  # ENV 플래그 배열 구성 (bash 배열로 특수문자 안전 처리)
+  _mcp_add_args=(claude mcp add --scope user)
+  [[ -n "$GEMINI_KEY" ]] && _mcp_add_args+=(-e "GEMINI_API_KEY=$GEMINI_KEY")
+  [[ -n "$GLM_KEY"    ]] && _mcp_add_args+=(-e "GLM_API_KEY=$GLM_KEY")
+  _mcp_add_args+=(multi-model-agent -- "$NODE_BIN_WIN" "$MCP_NODE_PATH/index.js")
+
+  if "${_mcp_add_args[@]}" 2>/dev/null; then
+    info "MCP 등록 완료 (claude mcp add --scope user)"
+    MCP_REGISTERED=true
+    # 등록 확인
+    if claude mcp get multi-model-agent &>/dev/null; then
+      info "MCP 확인: multi-model-agent ✓"
+    else
+      warn "claude mcp get 확인 실패 — Claude Code 재시작 후 동작 확인 필요"
+    fi
+  else
+    warn "claude mcp add 실패 → settings.json 직접 편집으로 폴백"
+  fi
+fi
+
+if [[ "$MCP_REGISTERED" == "false" ]]; then
+  warn "settings.json 직접 편집으로 MCP 등록 (claude CLI 미사용 또는 실패 시 폴백)"
+  python3 - "$SETTINGS_WIN" "$MCP_NODE_PATH" "$GEMINI_KEY" "$GLM_KEY" "$NODE_BIN_WIN" <<'PYEOF'
+import json, sys
+
+settings_path, mcp_path, gemini_key, glm_key, node_bin = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4], sys.argv[5]
+
+try:
+    with open(settings_path, 'r', encoding='utf-8') as f:
+        s = json.load(f)
+except (json.JSONDecodeError, FileNotFoundError):
+    s = {}
+
 mcp_servers = s.setdefault("mcpServers", {})
 
 # 기존 env 보존 후 업데이트
@@ -179,14 +231,13 @@ existing_env = mcp_servers.get("multi-model-agent", {}).get("env", {})
 mcp_env = {}
 if gemini_key: mcp_env["GEMINI_API_KEY"] = gemini_key
 if glm_key:    mcp_env["GLM_API_KEY"]    = glm_key
-# 기존 키 중 새로 입력 안 한 것은 유지
 for k, v in existing_env.items():
     if k not in mcp_env:
         mcp_env[k] = v
 
 mcp_entry = {
     "type": "stdio",
-    "command": node_bin,   # 전체 경로 사용 (nvm 등 PATH 비표준 환경 대비)
+    "command": node_bin,
     "args": [f"{mcp_path}/index.js"]
 }
 if mcp_env:
@@ -197,15 +248,14 @@ mcp_servers["multi-model-agent"] = mcp_entry
 with open(settings_path, 'w', encoding='utf-8') as f:
     json.dump(s, f, indent=2, ensure_ascii=False)
 
-print(f"  훅 등록: UserPromptSubmit (ulw-detector), SessionEnd (session-summary)")
 print(f"  MCP 등록: multi-model-agent → {mcp_path}/index.js")
-if mcp_env:
-    keys_str = ", ".join(mcp_env.keys())
-    print(f"  env 주입: {keys_str}")
+keys_str = ", ".join(mcp_env.keys()) if mcp_env else "없음"
+print(f"  env 주입: {keys_str}")
 PYEOF
-info "settings.json 업데이트 완료"
+  info "settings.json MCP 등록 완료"
+fi
 
-# ─── 9. GPT — codex auth.json 안내 ─────────────────────────
+# ─── 10. GPT — codex auth.json 안내 ────────────────────────
 step "GPT (Codex) 인증 설정"
 
 CODEX_AUTH="$HOME/.codex/auth.json"
