@@ -25,6 +25,27 @@ normalize_path() {
   fi
 }
 
+# ────────────────────────────────────────────────────────────────
+# Python 인터프리터 검색 (Windows Store stub 회피)
+# ────────────────────────────────────────────────────────────────
+find_python() {
+  # python3 → python → py -3 순서로 검색
+  for cmd in python3 python 'py -3'; do
+    # 명령 존재 여부 확인
+    if command -v ${cmd%% *} >/dev/null 2>&1; then
+      # 실제 인터프리터인지 테스트 (Windows Store stub은 타임아웃)
+      if timeout 2s $cmd -c "import sys" >/dev/null 2>&1; then
+        PYTHON_CMD="$cmd"
+        info "Python 인터프리터 발견: $PYTHON_CMD"
+        return 0
+      fi
+    fi
+  done
+
+  error "작동하는 Python 3 인터프리터를 찾을 수 없습니다.\n       Python을 설치하고 PATH에 추가하세요."
+}
+
+
 echo ""
 echo "════════════════════════════════════════════════"
 echo "   claude-omo  —  멀티모델 오케스트레이션 설치"
@@ -73,7 +94,11 @@ collect_key() {
   local varname="$1"
   local current="${!varname:-}"
   local prompt_url="$2"
-
+  # 비인터랙티브 모드면 기존 값만 반환
+  if [[ ! -t 0 ]]; then
+    echo "${current:-}"
+    return 0
+  fi
   if [[ -n "$current" ]]; then
     echo -n "  $varname [현재 환경변수 사용: ${current:0:6}...]: " >&2
     read -r input
@@ -94,11 +119,19 @@ GEMINI_KEY=$(collect_key "GEMINI_API_KEY" "https://aistudio.google.com/apikey")
 GLM_KEY=$(collect_key "GLM_API_KEY" "https://open.bigmodel.cn")
 OPENAI_KEY=$(collect_key "OPENAI_API_KEY" "https://platform.openai.com/api-keys")
 
+# ────────────────────────────────────────────────────────────────
+# Python 인터프리터 검색 실행
+# ────────────────────────────────────────────────────────────────
+step "Python 인터프리터 확인"
+if ! find_python; then
+  exit 1
+fi
+
 # 키가 없으면 기존 settings.json에서 복원 시도 (재설치 시 키 유지)
 _EXISTING_SETTINGS="$HOME/.claude/settings.json"
 if [[ -f "$_EXISTING_SETTINGS" ]]; then
   _get_existing_key() {
-    python3 -c "import json; s=json.load(open('$_EXISTING_SETTINGS')); print(s.get('mcpServers',{}).get('multi-model-agent',{}).get('env',{}).get('$1',''))" 2>/dev/null || echo ""
+    $PYTHON_CMD -c "import json; s=json.load(open('$_EXISTING_SETTINGS')); print(s.get('mcpServers',{}).get('multi-model-agent',{}).get('env',{}).get('$1',''))" 2>/dev/null || echo ""
   }
   [[ -z "$GEMINI_KEY" ]] && GEMINI_KEY=$(_get_existing_key "GEMINI_API_KEY") && [[ -n "$GEMINI_KEY" ]] && warn "GEMINI_API_KEY: settings.json 기존 키 재사용" >&2 || true
   [[ -z "$GLM_KEY"    ]] && GLM_KEY=$(_get_existing_key "GLM_API_KEY")    && [[ -n "$GLM_KEY"    ]] && warn "GLM_API_KEY: settings.json 기존 키 재사용" >&2 || true
@@ -133,12 +166,34 @@ info "커맨드 ${CMD_COUNT}개 복사 완료"
 # ─── 7. CLAUDE.md 복사 ─────────────────────────────────────
 step "CLAUDE.md 복사: $CLAUDE_DIR/CLAUDE.md"
 if [[ -f "$CLAUDE_DIR/CLAUDE.md" ]]; then
-  BACKUP="$CLAUDE_DIR/CLAUDE.md.bak.$(date +%Y%m%d_%H%M%S)"
-  cp "$CLAUDE_DIR/CLAUDE.md" "$BACKUP"
-  warn "기존 CLAUDE.md → $BACKUP 로 백업"
+  # 인터랙티브 모드인 경우에만 사용자 확인
+  if [[ -t 0 ]]; then
+    echo "" >&2
+    warn "기존 CLAUDE.md 파일이 존재합니다." >&2
+    echo "  [y] 덮어쓰기 (기존 파일은 백업됨)" >&2
+    echo "  [n] 건너뜀 (기존 파일 유지)" >&2
+    echo "" >&2
+    echo -n "  선택 [y/N]: " >&2
+    read -r overwrite_choice
+    if [[ "${overwrite_choice,,}" != "y" ]]; then
+      warn "CLAUDE.md 덮어쓰기 건너뜀 (기존 파일 유지)"
+    else
+      BACKUP="$CLAUDE_DIR/CLAUDE.md.bak.$(date +%Y%m%d_%H%M%S)"
+      cp "$CLAUDE_DIR/CLAUDE.md" "$BACKUP"
+      cp "$REPO_DIR/CLAUDE.md" "$CLAUDE_DIR/CLAUDE.md"
+      info "기존 CLAUDE.md → $BACKUP 로 백업 후 덮어쓰기 완료"
+    fi
+  else
+    # 비인터랙티브 모드: 백업 후 덮어쓰기
+    BACKUP="$CLAUDE_DIR/CLAUDE.md.bak.$(date +%Y%m%d_%H%M%S)"
+    cp "$CLAUDE_DIR/CLAUDE.md" "$BACKUP"
+    cp "$REPO_DIR/CLAUDE.md" "$CLAUDE_DIR/CLAUDE.md"
+    warn "비인터랙티브 모드: 기존 CLAUDE.md → $BACKUP 로 백업 후 덮어쓰기"
+  fi
+else
+  cp "$REPO_DIR/CLAUDE.md" "$CLAUDE_DIR/CLAUDE.md"
+  info "CLAUDE.md 복사 완료"
 fi
-cp "$REPO_DIR/CLAUDE.md" "$CLAUDE_DIR/CLAUDE.md"
-info "CLAUDE.md 복사 완료"
 
 # ─── 8. settings.json 훅 등록 ──────────────────────────────
 step "settings.json 훅 등록"
@@ -152,7 +207,7 @@ SETTINGS_WIN="$(normalize_path "$SETTINGS")"
 NODE_BIN="$(command -v node)"
 NODE_BIN_WIN="$(normalize_path "$NODE_BIN")"
 
-python3 - "$SETTINGS_WIN" "$MCP_NODE_PATH" "$NODE_BIN_WIN" <<'PYEOF'
+$PYTHON_CMD - "$SETTINGS_WIN" "$MCP_NODE_PATH" "$NODE_BIN_WIN" <<'PYEOF'
 import json, os, sys
 
 settings_path, mcp_path, node_bin = sys.argv[1], sys.argv[2], sys.argv[3]
@@ -229,7 +284,7 @@ fi
 
 if [[ "$MCP_REGISTERED" == "false" ]]; then
   warn "settings.json 직접 편집으로 MCP 등록 (claude CLI 미사용 또는 실패 시 폴백)"
-  python3 - "$SETTINGS_WIN" "$MCP_NODE_PATH" "$GEMINI_KEY" "$GLM_KEY" "$NODE_BIN_WIN" "$OPENAI_KEY" <<'PYEOF'
+  $PYTHON_CMD - "$SETTINGS_WIN" "$MCP_NODE_PATH" "$GEMINI_KEY" "$GLM_KEY" "$NODE_BIN_WIN" "$OPENAI_KEY" <<'PYEOF'
 import json, sys
 
 settings_path, mcp_path, gemini_key, glm_key, node_bin, openai_key = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4], sys.argv[5], sys.argv[6]
@@ -272,10 +327,9 @@ PYEOF
   info "settings.json MCP 등록 완료"
 fi
 
+CODEX_AUTH="$HOME/.codex/auth.json"
 # ─── 10. GPT — codex auth.json 안내 ────────────────────────
 step "GPT (Codex) 인증 설정"
-
-CODEX_AUTH="$HOME/.codex/auth.json"
 if [[ -f "$CODEX_AUTH" ]]; then
   info "~/.codex/auth.json 이미 존재 — GPT 바로 사용 가능"
 else
@@ -297,14 +351,19 @@ else
   fi
   echo ""
   mkdir -p "$HOME/.codex"
-  echo -n "  auth.json 내용을 지금 붙여넣을까요? [y/N]: "
-  read -r paste_auth
-  if [[ "${paste_auth,,}" == "y" ]]; then
-    echo "  auth.json 내용을 붙여넣고 Ctrl+D로 완료:"
-    cat > "$CODEX_AUTH"
-    info "~/.codex/auth.json 저장 완료"
+  # 비인터랙티브 모드면 안내만 출력
+  if [[ ! -t 0 ]]; then
+    warn "비인터랙티브 모드: auth.json 수동 생성 필요. 나중에 codex login 실행 또는 파일 복사하세요."
   else
-    warn "GPT는 나중에 auth.json 복사 후 사용 가능"
+    echo -n "  auth.json 내용을 지금 붙여넣을까요? [y/N]: "
+    read -r paste_auth
+    if [[ "${paste_auth,,}" == "y" ]]; then
+      echo "  auth.json 내용을 붙여넣고 Ctrl+D로 완료:"
+      cat > "$CODEX_AUTH"
+      info "~/.codex/auth.json 저장 완료"
+    else
+      warn "GPT는 나중에 auth.json 복사 후 사용 가능"
+    fi
   fi
 fi
 
