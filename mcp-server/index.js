@@ -199,13 +199,13 @@ async function doRefreshToken(refreshToken, clientId) {
 async function getValidAccessToken() {
   // ── 1순위: OPENAI_API_KEY 환경변수 ──────────────────────────
   if (process.env.OPENAI_API_KEY) {
-    return process.env.OPENAI_API_KEY;
+    return { token: process.env.OPENAI_API_KEY, isOAuthOnly: false };
   }
 
   // ── 2순위: auth.json의 OPENAI_API_KEY ───────────────────────
   const auth = readAuthJson();
   if (auth?.OPENAI_API_KEY) {
-    return auth.OPENAI_API_KEY;
+    return { token: auth.OPENAI_API_KEY, isOAuthOnly: false };
   }
 
   // ── 3순위: ChatGPT OAuth access_token ───────────────────────
