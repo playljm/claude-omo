@@ -118,12 +118,17 @@ except (json.JSONDecodeError, FileNotFoundError):
 hooks = s.setdefault("hooks", {})
 
 def upsert_hook(hooks, event, cmd):
-    """이미 등록된 경우 중복 삽입 방지"""
-    entries = hooks.setdefault(event, [{"hooks": []}])
-    existing = [h.get("command", "") for h in entries[0].get("hooks", [])]
+    """이미 등록된 경우 중복 삽입 방지. 빈 배열/비정상 구조도 복구."""
+    entries = hooks.setdefault(event, [])
+    # 빈 배열이거나 첫 요소가 dict가 아닌 경우 초기화
+    if not entries or not isinstance(entries[0], dict):
+        entries.clear()
+        entries.append({"hooks": []})
+    hook_list = entries[0].setdefault("hooks", [])
+    existing = [h.get("command", "") for h in hook_list]
     script_name = os.path.basename(cmd.split()[1])
     if not any(script_name in c for c in existing):
-        entries[0].setdefault("hooks", []).append({"type": "command", "command": cmd})
+        hook_list.append({"type": "command", "command": cmd})
 
 ulw_cmd  = f"node {mcp_path}/ulw-detector.js 2>/dev/null || true"
 sess_cmd = f"node {mcp_path}/session-summary.js 2>/dev/null || true"
