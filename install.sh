@@ -19,7 +19,6 @@ step()  { echo -e "\n${CYAN}▶ $1${NC}"; }
 normalize_path() {
   local p="$1"
   if [[ "$OSTYPE" == "msys" || "$OSTYPE" == "cygwin" ]]; then
-    # /c/Users/... → C:/Users/...  (Node.js는 Unix 슬래시도 인식)
     echo "$p" | sed 's|^/\([a-zA-Z]\)/|\1:/|'
   else
     echo "$p"
@@ -61,28 +60,62 @@ else
   info "Claude Code: $(claude --version 2>/dev/null || echo 'installed')"
 fi
 
-# ─── 3. MCP 서버 설치 ──────────────────────────────────────
+# ─── 3. API 키 수집 (MCP env 주입용) ────────────────────────
+step "API 키 수집"
+echo "  MCP 서버가 API 키를 읽으려면 settings.json에 직접 주입해야 합니다."
+echo "  (Linux/Rocky에서 .bashrc 환경변수는 MCP 프로세스에 전달되지 않음)"
+echo ""
+
+# 현재 환경변수에 있으면 기본값으로 사용, 없으면 입력 요청
+collect_key() {
+  local varname="$1"
+  local current="${!varname:-}"
+  local prompt_url="$2"
+
+  if [[ -n "$current" ]]; then
+    echo -n "  $varname [현재 환경변수 사용: ${current:0:6}...]: "
+    read -r input
+    if [[ -z "$input" ]]; then
+      echo "$current"
+    else
+      echo "$input"
+    fi
+  else
+    echo "  $varname 없음 → $prompt_url"
+    echo -n "  입력 (엔터=건너뜀): "
+    read -r input
+    echo "${input:-}"
+  fi
+}
+
+GEMINI_KEY=$(collect_key "GEMINI_API_KEY" "https://aistudio.google.com/apikey")
+GLM_KEY=$(collect_key "GLM_API_KEY" "https://open.bigmodel.cn")
+
+[[ -n "$GEMINI_KEY" ]] && info "GEMINI_API_KEY 수집됨" || warn "GEMINI_API_KEY 건너뜀 (나중에 수동 설정 필요)"
+[[ -n "$GLM_KEY"    ]] && info "GLM_API_KEY 수집됨"    || warn "GLM_API_KEY 건너뜀 (나중에 수동 설정 필요)"
+
+# ─── 4. MCP 서버 설치 ──────────────────────────────────────
 step "MCP 서버 설치: $MCP_DIR"
 mkdir -p "$MCP_DIR"
 cp -r "$REPO_DIR/mcp-server/." "$MCP_DIR/"
 (cd "$MCP_DIR" && npm install --silent --no-audit)
 info "MCP 서버 설치 완료 ($(node -e "console.log(require('$MCP_DIR/package.json').version)" 2>/dev/null || echo 'v4.0.0'))"
 
-# ─── 4. 에이전트 복사 ──────────────────────────────────────
+# ─── 5. 에이전트 복사 ──────────────────────────────────────
 step "에이전트 복사: $CLAUDE_DIR/agents/"
 mkdir -p "$CLAUDE_DIR/agents"
 cp "$REPO_DIR/agents/"*.md "$CLAUDE_DIR/agents/"
 AGENT_COUNT=$(ls "$CLAUDE_DIR/agents/"*.md 2>/dev/null | wc -l | tr -d ' ')
 info "에이전트 ${AGENT_COUNT}개 복사 완료"
 
-# ─── 5. 커맨드 복사 ────────────────────────────────────────
+# ─── 6. 커맨드 복사 ────────────────────────────────────────
 step "커맨드 복사: $CLAUDE_DIR/commands/"
 mkdir -p "$CLAUDE_DIR/commands"
 cp "$REPO_DIR/commands/"*.md "$CLAUDE_DIR/commands/"
 CMD_COUNT=$(ls "$CLAUDE_DIR/commands/"*.md 2>/dev/null | wc -l | tr -d ' ')
 info "커맨드 ${CMD_COUNT}개 복사 완료"
 
-# ─── 6. CLAUDE.md 복사 ─────────────────────────────────────
+# ─── 7. CLAUDE.md 복사 ─────────────────────────────────────
 step "CLAUDE.md 복사: $CLAUDE_DIR/CLAUDE.md"
 if [[ -f "$CLAUDE_DIR/CLAUDE.md" ]]; then
   BACKUP="$CLAUDE_DIR/CLAUDE.md.bak.$(date +%Y%m%d_%H%M%S)"
@@ -92,21 +125,19 @@ fi
 cp "$REPO_DIR/CLAUDE.md" "$CLAUDE_DIR/CLAUDE.md"
 info "CLAUDE.md 복사 완료"
 
-# ─── 7. settings.json 업데이트 ─────────────────────────────
-step "settings.json 훅 + MCP 서버 등록"
+# ─── 8. settings.json 업데이트 ─────────────────────────────
+step "settings.json 훅 + MCP 서버 등록 (API 키 env 주입 포함)"
 
 SETTINGS="$CLAUDE_DIR/settings.json"
 [[ ! -f "$SETTINGS" ]] && echo '{}' > "$SETTINGS"
 
-# Node.js/Python용 절대경로 (Windows Git Bash에서도 작동)
 MCP_NODE_PATH="$(normalize_path "$MCP_DIR")"
 SETTINGS_WIN="$(normalize_path "$SETTINGS")"
 
-python3 - <<PYEOF
+python3 - "$SETTINGS_WIN" "$MCP_NODE_PATH" "$GEMINI_KEY" "$GLM_KEY" <<'PYEOF'
 import json, os, sys
 
-settings_path = "$SETTINGS_WIN"
-mcp_path = "$MCP_NODE_PATH"
+settings_path, mcp_path, gemini_key, glm_key = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
 
 try:
     with open(settings_path, 'r', encoding='utf-8') as f:
@@ -118,9 +149,8 @@ except (json.JSONDecodeError, FileNotFoundError):
 hooks = s.setdefault("hooks", {})
 
 def upsert_hook(hooks, event, cmd):
-    """이미 등록된 경우 중복 삽입 방지. 빈 배열/비정상 구조도 복구."""
+    """빈 배열/비정상 구조도 복구, 중복 삽입 방지"""
     entries = hooks.setdefault(event, [])
-    # 빈 배열이거나 첫 요소가 dict가 아닌 경우 초기화
     if not entries or not isinstance(entries[0], dict):
         entries.clear()
         entries.append({"hooks": []})
@@ -136,57 +166,74 @@ sess_cmd = f"node {mcp_path}/session-summary.js 2>/dev/null || true"
 upsert_hook(hooks, "UserPromptSubmit", ulw_cmd)
 upsert_hook(hooks, "SessionEnd", sess_cmd)
 
-# ── mcpServers ─────────────────────────────────
+# ── mcpServers (API 키 env 주입) ────────────────
 mcp_servers = s.setdefault("mcpServers", {})
-mcp_servers["multi-model-agent"] = {
+
+# 기존 env 보존 후 업데이트
+existing_env = mcp_servers.get("multi-model-agent", {}).get("env", {})
+mcp_env = {}
+if gemini_key: mcp_env["GEMINI_API_KEY"] = gemini_key
+if glm_key:    mcp_env["GLM_API_KEY"]    = glm_key
+# 기존 키 중 새로 입력 안 한 것은 유지
+for k, v in existing_env.items():
+    if k not in mcp_env:
+        mcp_env[k] = v
+
+mcp_entry = {
     "type": "stdio",
     "command": "node",
     "args": [f"{mcp_path}/index.js"]
 }
+if mcp_env:
+    mcp_entry["env"] = mcp_env
+
+mcp_servers["multi-model-agent"] = mcp_entry
 
 with open(settings_path, 'w', encoding='utf-8') as f:
     json.dump(s, f, indent=2, ensure_ascii=False)
 
 print(f"  훅 등록: UserPromptSubmit (ulw-detector), SessionEnd (session-summary)")
 print(f"  MCP 등록: multi-model-agent → {mcp_path}/index.js")
+if mcp_env:
+    keys_str = ", ".join(mcp_env.keys())
+    print(f"  env 주입: {keys_str}")
 PYEOF
 info "settings.json 업데이트 완료"
 
-# ─── 8. API 키 안내 ─────────────────────────────────────────
-step "환경변수 설정 안내"
+# ─── 9. GPT — codex auth.json 안내 ─────────────────────────
+step "GPT (Codex) 인증 설정"
 
-MISSING_KEYS=0
-echo ""
-
-if [[ -z "${GEMINI_API_KEY:-}" ]]; then
-  warn "GEMINI_API_KEY 미설정  →  https://aistudio.google.com/apikey"
-  MISSING_KEYS=$((MISSING_KEYS + 1))
+CODEX_AUTH="$HOME/.codex/auth.json"
+if [[ -f "$CODEX_AUTH" ]]; then
+  info "~/.codex/auth.json 이미 존재 — GPT 바로 사용 가능"
 else
-  info "GEMINI_API_KEY ✓"
-fi
-
-if [[ -z "${GLM_API_KEY:-}" ]]; then
-  warn "GLM_API_KEY 미설정    →  https://open.bigmodel.cn"
-  MISSING_KEYS=$((MISSING_KEYS + 1))
-else
-  info "GLM_API_KEY ✓"
-fi
-
-if ! command -v codex &>/dev/null; then
-  warn "codex CLI 미설치      →  npm install -g @openai/codex  &&  codex login"
-else
-  info "Codex CLI ✓"
-fi
-
-if [[ $MISSING_KEYS -gt 0 ]]; then
+  warn "~/.codex/auth.json 없음"
   echo ""
-  SHELL_RC="$HOME/.bashrc"
-  [[ -f "$HOME/.zshrc" ]] && SHELL_RC="$HOME/.zshrc"
-  echo "  다음을 ${SHELL_RC} 에 추가한 뒤 source 하세요:"
+  echo "  [방법 1] codex login 실행 (브라우저 OAuth)"
+  echo "    npm install -g @openai/codex && codex login"
   echo ""
-  echo "    export GEMINI_API_KEY='your_key_here'"
-  echo "    export GLM_API_KEY='your_key_here'"
+  echo "  [방법 2] 다른 머신에서 auth.json 복사 (브라우저 없는 서버용)"
+  if [[ "$OS" == "linux" ]]; then
+    echo "    # Windows/Mac 머신에서 실행:"
+    echo "    scp ~/.codex/auth.json $(whoami)@<이-서버-IP>:~/.codex/auth.json"
+    echo ""
+    echo "    # 또는 이 서버에서 직접:"
+    echo "    mkdir -p ~/.codex"
+    echo "    cat > ~/.codex/auth.json << 'EOF'"
+    echo "    { \"auth_mode\": \"chatgpt\", \"tokens\": { \"access_token\": \"...\", \"refresh_token\": \"...\" } }"
+    echo "    EOF"
+  fi
   echo ""
+  mkdir -p "$HOME/.codex"
+  echo -n "  auth.json 내용을 지금 붙여넣을까요? [y/N]: "
+  read -r paste_auth
+  if [[ "${paste_auth,,}" == "y" ]]; then
+    echo "  auth.json 내용을 붙여넣고 Ctrl+D로 완료:"
+    cat > "$CODEX_AUTH"
+    info "~/.codex/auth.json 저장 완료"
+  else
+    warn "GPT는 나중에 auth.json 복사 후 사용 가능"
+  fi
 fi
 
 # ─── 완료 ──────────────────────────────────────────────────
