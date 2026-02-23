@@ -98,7 +98,8 @@ cp CLAUDE.md ~/.claude/CLAUDE.md
 | 에이전트 | 역할 | 모델 |
 |----------|------|------|
 | `sisyphus` | 멀티에이전트 오케스트레이터 | Sonnet |
-| `oracle` | 아키텍처 컨설턴트 | GPT high |
+| `oracle` | 아키텍처 컨설턴트 (읽기전용) | **Opus 4.6** |
+| `debugger` | 난해한 버그 진단 (읽기전용) | GPT high |
 | `researcher` | 대규모 코드 분석 | Gemini |
 | `worker` | CRUD/보일러플레이트 구현 | GLM |
 | `reviewer` | 코드 리뷰 (3모델 병렬) | ask_parallel |
