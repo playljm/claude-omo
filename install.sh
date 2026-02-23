@@ -203,10 +203,12 @@ if command -v claude &>/dev/null; then
   claude mcp remove multi-model-agent 2>/dev/null || true
 
   # ENV 플래그 배열 구성 (bash 배열로 특수문자 안전 처리)
-  _mcp_add_args=(claude mcp add --scope user)
+  # 주의: 이름(multi-model-agent)이 -e 플래그보다 먼저 와야 함
+  # (claude mcp add의 <env...> 가변인자가 이름을 env값으로 잘못 파싱하는 버그 방지)
+  _mcp_add_args=(claude mcp add --scope user multi-model-agent)
   [[ -n "$GEMINI_KEY" ]] && _mcp_add_args+=(-e "GEMINI_API_KEY=$GEMINI_KEY")
   [[ -n "$GLM_KEY"    ]] && _mcp_add_args+=(-e "GLM_API_KEY=$GLM_KEY")
-  _mcp_add_args+=(multi-model-agent -- "$NODE_BIN_WIN" "$MCP_NODE_PATH/index.js")
+  _mcp_add_args+=(-- "$NODE_BIN_WIN" "$MCP_NODE_PATH/index.js")
 
   if "${_mcp_add_args[@]}" 2>/dev/null; then
     info "MCP 등록 완료 (claude mcp add --scope user)"
