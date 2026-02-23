@@ -144,7 +144,8 @@ async function fetchWithRetry(url, options, maxRetries = 3) {
 
 // ───────────────────────────────────────────────
 // GPT OAuth 토큰 관리
-// auth.json 구조: { tokens: { access_token, refresh_token }, last_refresh }
+// auth.json 구조: { tokens: { access_token, refresh_token }, OPENAI_API_KEY, last_refresh }
+// 우선순위: 1) OPENAI_API_KEY 환경변수  2) auth.json의 OPENAI_API_KEY  3) ChatGPT OAuth
 // ───────────────────────────────────────────────
 const CODEX_AUTH_PATH = join(homedir(), ".codex", "auth.json");
 const TOKEN_REFRESH_URL = "https://auth.openai.com/oauth/token";
@@ -196,10 +197,24 @@ async function doRefreshToken(refreshToken, clientId) {
 }
 
 async function getValidAccessToken() {
+  // ── 1순위: OPENAI_API_KEY 환경변수 ──────────────────────────
+  if (process.env.OPENAI_API_KEY) {
+    return process.env.OPENAI_API_KEY;
+  }
+
+  // ── 2순위: auth.json의 OPENAI_API_KEY ───────────────────────
   const auth = readAuthJson();
+  if (auth?.OPENAI_API_KEY) {
+    return auth.OPENAI_API_KEY;
+  }
+
+  // ── 3순위: ChatGPT OAuth access_token ───────────────────────
   if (!auth) {
     throw new Error(
-      "~/.codex/auth.json 파일이 없습니다. 터미널에서 `codex login`을 실행하세요."
+      "GPT 인증 없음. 다음 중 하나를 설정하세요:\n" +
+      "  방법 1) OPENAI_API_KEY 환경변수 설정 (platform.openai.com에서 발급)\n" +
+      "  방법 2) ~/.codex/auth.json의 OPENAI_API_KEY 필드에 sk-... 키 입력\n" +
+      "  방법 3) codex login 으로 ChatGPT OAuth 인증 (api.responses.write 스코프 필요)"
     );
   }
 
@@ -213,16 +228,19 @@ async function getValidAccessToken() {
 
   const { exp: expiry, scopes, clientId } = getJwtInfo(accessToken);
 
-  // 스코프 체크 — 만료 여부와 무관하게 api.responses.write 없으면 즉시 실패
-  // (refresh로는 이 스코프를 얻을 수 없음 → 재로그인 필요)
+  // ChatGPT OAuth 토큰은 api.responses.write 스코프 필요
+  // (refresh로는 이 스코프를 얻을 수 없음 — OpenAI 플랫폼 제한)
   if (!scopes.includes("api.responses.write")) {
     throw new Error(
-      `auth.json 토큰에 api.responses.write 스코프가 없습니다.\n${SCOPE_RE_LOGIN_MSG}`
+      `auth.json ChatGPT 토큰에 api.responses.write 스코프가 없습니다.\n` +
+      `OPENAI_API_KEY(sk-...) 설정을 권장합니다:\n` +
+      `  install.sh 재실행 시 OPENAI_API_KEY 입력\n` +
+      `  또는: claude mcp add --scope user multi-model-agent -e OPENAI_API_KEY=sk-... ...\n` +
+      `${SCOPE_RE_LOGIN_MSG}`
     );
   }
 
   const isExpired = expiry > 0 && Date.now() / 1000 > expiry - 60;
-
   if (!isExpired) return accessToken;
 
   if (!refreshToken) {

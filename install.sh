@@ -92,20 +92,22 @@ collect_key() {
 
 GEMINI_KEY=$(collect_key "GEMINI_API_KEY" "https://aistudio.google.com/apikey")
 GLM_KEY=$(collect_key "GLM_API_KEY" "https://open.bigmodel.cn")
+OPENAI_KEY=$(collect_key "OPENAI_API_KEY" "https://platform.openai.com/api-keys")
 
 # 키가 없으면 기존 settings.json에서 복원 시도 (재설치 시 키 유지)
 _EXISTING_SETTINGS="$HOME/.claude/settings.json"
-if [[ -z "$GEMINI_KEY" ]] && [[ -f "$_EXISTING_SETTINGS" ]]; then
-  GEMINI_KEY=$(python3 -c "import json; s=json.load(open('$_EXISTING_SETTINGS')); print(s.get('mcpServers',{}).get('multi-model-agent',{}).get('env',{}).get('GEMINI_API_KEY',''))" 2>/dev/null || echo "")
-  [[ -n "$GEMINI_KEY" ]] && warn "GEMINI_API_KEY: settings.json 기존 키 재사용" >&2
-fi
-if [[ -z "$GLM_KEY" ]] && [[ -f "$_EXISTING_SETTINGS" ]]; then
-  GLM_KEY=$(python3 -c "import json; s=json.load(open('$_EXISTING_SETTINGS')); print(s.get('mcpServers',{}).get('multi-model-agent',{}).get('env',{}).get('GLM_API_KEY',''))" 2>/dev/null || echo "")
-  [[ -n "$GLM_KEY" ]] && warn "GLM_API_KEY: settings.json 기존 키 재사용" >&2
+if [[ -f "$_EXISTING_SETTINGS" ]]; then
+  _get_existing_key() {
+    python3 -c "import json; s=json.load(open('$_EXISTING_SETTINGS')); print(s.get('mcpServers',{}).get('multi-model-agent',{}).get('env',{}).get('$1',''))" 2>/dev/null || echo ""
+  }
+  [[ -z "$GEMINI_KEY" ]] && GEMINI_KEY=$(_get_existing_key "GEMINI_API_KEY") && [[ -n "$GEMINI_KEY" ]] && warn "GEMINI_API_KEY: settings.json 기존 키 재사용" >&2 || true
+  [[ -z "$GLM_KEY"    ]] && GLM_KEY=$(_get_existing_key "GLM_API_KEY")    && [[ -n "$GLM_KEY"    ]] && warn "GLM_API_KEY: settings.json 기존 키 재사용" >&2 || true
+  [[ -z "$OPENAI_KEY" ]] && OPENAI_KEY=$(_get_existing_key "OPENAI_API_KEY") && [[ -n "$OPENAI_KEY" ]] && warn "OPENAI_API_KEY: settings.json 기존 키 재사용" >&2 || true
 fi
 
-[[ -n "$GEMINI_KEY" ]] && info "GEMINI_API_KEY 수집됨" || warn "GEMINI_API_KEY 건너뜀 (나중에 수동 설정 필요)"
-[[ -n "$GLM_KEY"    ]] && info "GLM_API_KEY 수집됨"    || warn "GLM_API_KEY 건너뜀 (나중에 수동 설정 필요)"
+[[ -n "$GEMINI_KEY"  ]] && info "GEMINI_API_KEY 수집됨"  || warn "GEMINI_API_KEY 건너뜀 (나중에 수동 설정 필요)"
+[[ -n "$GLM_KEY"     ]] && info "GLM_API_KEY 수집됨"     || warn "GLM_API_KEY 건너뜀 (나중에 수동 설정 필요)"
+[[ -n "$OPENAI_KEY"  ]] && info "OPENAI_API_KEY 수집됨"  || warn "OPENAI_API_KEY 건너뜀 (GPT는 ~/.codex/auth.json 으로 폴백)"
 
 # ─── 4. MCP 서버 설치 ──────────────────────────────────────
 step "MCP 서버 설치: $MCP_DIR"
@@ -206,8 +208,9 @@ if command -v claude &>/dev/null; then
   # 주의: 이름(multi-model-agent)이 -e 플래그보다 먼저 와야 함
   # (claude mcp add의 <env...> 가변인자가 이름을 env값으로 잘못 파싱하는 버그 방지)
   _mcp_add_args=(claude mcp add --scope user multi-model-agent)
-  [[ -n "$GEMINI_KEY" ]] && _mcp_add_args+=(-e "GEMINI_API_KEY=$GEMINI_KEY")
-  [[ -n "$GLM_KEY"    ]] && _mcp_add_args+=(-e "GLM_API_KEY=$GLM_KEY")
+  [[ -n "$GEMINI_KEY"  ]] && _mcp_add_args+=(-e "GEMINI_API_KEY=$GEMINI_KEY")
+  [[ -n "$GLM_KEY"     ]] && _mcp_add_args+=(-e "GLM_API_KEY=$GLM_KEY")
+  [[ -n "$OPENAI_KEY"  ]] && _mcp_add_args+=(-e "OPENAI_API_KEY=$OPENAI_KEY")
   _mcp_add_args+=(-- "$NODE_BIN_WIN" "$MCP_NODE_PATH/index.js")
 
   if "${_mcp_add_args[@]}" 2>/dev/null; then
@@ -226,10 +229,10 @@ fi
 
 if [[ "$MCP_REGISTERED" == "false" ]]; then
   warn "settings.json 직접 편집으로 MCP 등록 (claude CLI 미사용 또는 실패 시 폴백)"
-  python3 - "$SETTINGS_WIN" "$MCP_NODE_PATH" "$GEMINI_KEY" "$GLM_KEY" "$NODE_BIN_WIN" <<'PYEOF'
+  python3 - "$SETTINGS_WIN" "$MCP_NODE_PATH" "$GEMINI_KEY" "$GLM_KEY" "$NODE_BIN_WIN" "$OPENAI_KEY" <<'PYEOF'
 import json, sys
 
-settings_path, mcp_path, gemini_key, glm_key, node_bin = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4], sys.argv[5]
+settings_path, mcp_path, gemini_key, glm_key, node_bin, openai_key = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4], sys.argv[5], sys.argv[6]
 
 try:
     with open(settings_path, 'r', encoding='utf-8') as f:
@@ -244,6 +247,7 @@ existing_env = mcp_servers.get("multi-model-agent", {}).get("env", {})
 mcp_env = {}
 if gemini_key: mcp_env["GEMINI_API_KEY"] = gemini_key
 if glm_key:    mcp_env["GLM_API_KEY"]    = glm_key
+if openai_key: mcp_env["OPENAI_API_KEY"] = openai_key
 for k, v in existing_env.items():
     if k not in mcp_env:
         mcp_env[k] = v
