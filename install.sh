@@ -93,6 +93,17 @@ collect_key() {
 GEMINI_KEY=$(collect_key "GEMINI_API_KEY" "https://aistudio.google.com/apikey")
 GLM_KEY=$(collect_key "GLM_API_KEY" "https://open.bigmodel.cn")
 
+# 키가 없으면 기존 settings.json에서 복원 시도 (재설치 시 키 유지)
+_EXISTING_SETTINGS="$HOME/.claude/settings.json"
+if [[ -z "$GEMINI_KEY" ]] && [[ -f "$_EXISTING_SETTINGS" ]]; then
+  GEMINI_KEY=$(python3 -c "import json; s=json.load(open('$_EXISTING_SETTINGS')); print(s.get('mcpServers',{}).get('multi-model-agent',{}).get('env',{}).get('GEMINI_API_KEY',''))" 2>/dev/null || echo "")
+  [[ -n "$GEMINI_KEY" ]] && warn "GEMINI_API_KEY: settings.json 기존 키 재사용" >&2
+fi
+if [[ -z "$GLM_KEY" ]] && [[ -f "$_EXISTING_SETTINGS" ]]; then
+  GLM_KEY=$(python3 -c "import json; s=json.load(open('$_EXISTING_SETTINGS')); print(s.get('mcpServers',{}).get('multi-model-agent',{}).get('env',{}).get('GLM_API_KEY',''))" 2>/dev/null || echo "")
+  [[ -n "$GLM_KEY" ]] && warn "GLM_API_KEY: settings.json 기존 키 재사용" >&2
+fi
+
 [[ -n "$GEMINI_KEY" ]] && info "GEMINI_API_KEY 수집됨" || warn "GEMINI_API_KEY 건너뜀 (나중에 수동 설정 필요)"
 [[ -n "$GLM_KEY"    ]] && info "GLM_API_KEY 수집됨"    || warn "GLM_API_KEY 건너뜀 (나중에 수동 설정 필요)"
 

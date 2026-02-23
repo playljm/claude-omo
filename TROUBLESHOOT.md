@@ -200,7 +200,8 @@ scp ~/.codex/auth.json root@<서버IP>:~/.codex/auth.json
 또는 `claude mcp list`에서 `multi-model-agent`가 보이지 않음.
 
 ### 원인
-`settings.json`의 `mcpServers` 직접 편집만으로는 Claude Code가 MCP를 인식하지 못하는 경우가 있음.
+`claude mcp add --scope user`는 `~/.claude/settings.json`이 아닌 **`~/.claude.json`** 파일에 MCP를 등록함.
+`settings.json`의 `mcpServers` 직접 편집만으로는 Claude Code가 MCP를 인식하지 못함.
 반드시 `claude mcp add --scope user` CLI 명령으로 등록해야 `claude mcp list`에 표시되고 세션에서 도구가 활성화됨.
 
 ### 확인
