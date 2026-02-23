@@ -5,7 +5,7 @@
  * 연결 모델:
  *   - GPT-5.3-Codex  : ChatGPT OAuth (~/.codex/auth.json) → Responses API /v1/responses
  *   - Gemini 2.5 Pro : AI Studio API Key → OpenAI 호환 엔드포인트
- *   - GLM-5          : Z.ai API Key     → OpenAI 호환 엔드포인트
+ *   - GLM-4.7-Flash  : Z.ai API Key     → OpenAI 호환 엔드포인트
  *
  * v4.0 신규:
  *   - fetchWithRetry: 429/500/502/503/529 → 최대 3회 재시도, 지수 백오프
@@ -414,7 +414,7 @@ async function callGemini(
 // ───────────────────────────────────────────────
 async function callGlm(
   prompt,
-  model = "glm-5",
+  model = "glm-4.7-flash",
   systemPrompt = null,
   maxTokens = null,
   temperature = null,
@@ -506,7 +506,7 @@ async function callSmartRoute(task, category = null, context = null, maxTokens =
       case "gemini":
         return callGemini(fullPrompt, "gemini-2.5-pro", null, maxTokens, null, logExtra);
       case "glm":
-        return callGlm(fullPrompt, "glm-5", null, maxTokens, null, logExtra);
+        return callGlm(fullPrompt, "glm-4.7-flash", null, maxTokens, null, logExtra);
       default:
         throw new Error(`알 수 없는 모델: ${model}`);
     }
@@ -549,7 +549,7 @@ async function callAskParallel(prompt, models = null, systemPrompt = null) {
   const modelCalls = {
     gpt:    () => callGpt(prompt, "gpt-5.3-codex", systemPrompt, "medium", null, logExtra),
     gemini: () => callGemini(prompt, "gemini-2.5-pro", systemPrompt, null, null, logExtra),
-    glm:    () => callGlm(prompt, "glm-5", systemPrompt, null, null, logExtra),
+    glm:    () => callGlm(prompt, "glm-4.7-flash", systemPrompt, null, null, logExtra),
   };
 
   const results = await Promise.allSettled(selectedModels.map((m) => modelCalls[m]()));
@@ -715,7 +715,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
     {
       name: "ask_glm",
       description: [
-        "GLM-5(Z.ai)에게 작업을 위임합니다. 비용 효율 최우선.",
+        "GLM-4.7-Flash(Z.ai)에게 작업을 위임합니다. 비용 효율 최우선.",
         "",
         "【반드시 이 툴을 먼저 고려할 상황】",
         "- 보일러플레이트 코드 (CRUD, 마이그레이션, 시드 파일)",
@@ -730,11 +730,11 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
       inputSchema: {
         type: "object",
         properties: {
-          prompt: { type: "string", description: "GLM-5에게 전달할 작업 내용" },
+          prompt: { type: "string", description: "GLM-4.7-Flash에게 전달할 작업 내용" },
           model: {
             type: "string",
             description: "사용할 GLM 모델",
-            default: "glm-5",
+            default: "glm-4.7-flash",
           },
           system_prompt: { type: "string", description: "시스템 프롬프트 (선택사항)" },
           max_tokens: { type: "number", description: "최대 출력 토큰 수 (기본값: 4096)" },
@@ -811,7 +811,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       case "ask_glm":
         result = await callGlm(
           args.prompt,
-          args.model ?? "glm-5",
+          args.model ?? "glm-4.7-flash",
           args.system_prompt ?? null,
           args.max_tokens ?? null,
           args.temperature ?? null
