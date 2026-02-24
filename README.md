@@ -81,7 +81,7 @@ auth.json 구조:
 |------|--------|------|-----------|
 | GPT | `gpt-5.3-codex` | OAuth JWT | `~/.codex/auth.json` |
 | Gemini | `gemini-2.5-pro` | API Key | `settings.json mcpServers.env` |
-| GLM | `glm-5` | API Key | `settings.json mcpServers.env` |
+| GLM | `glm-4.7-flash` | API Key | `settings.json mcpServers.env` |
 
 ---
 
@@ -98,7 +98,8 @@ claude-omo/
 │   ├── session-summary.js       # 세션 요약
 │   └── hooks/                   # Quality Hooks (NEW v5.0)
 │       ├── comment-checker.js   # AI 슬랭 코멘트 감지 (PostToolUse)
-│       └── write-guard.js       # 기존 파일 덮어쓰기 방지 (PreToolUse)
+│       ├── write-guard.js       # 기존 파일 덮어쓰기 방지 (PreToolUse)
+│       └── routing-display.js   # 라우팅 가시화 (PostToolUse)
 ├── agents/                      # ~/.claude/agents/ 에 복사 (13개)
 │   ├── sisyphus.md              # 멀티에이전트 오케스트레이터 + Intent Gate
 │   ├── sisyphus-junior.md       # 집중 실행자 (위임 루프 방지) [NEW]
@@ -224,6 +225,7 @@ task(category="visual-engineering", load_skills=["frontend-ui-ux", "playwright"]
 |----|------|------|
 | `comment-checker` | PostToolUse | AI 슬랭("이 함수는", "중요:", "주의:") 코멘트 감지 및 경고 |
 | `write-guard` | PreToolUse | 기존 파일 덮어쓰기 전 Read 여부 확인, 미확인 시 차단 |
+| `routing-display` | PostToolUse | 외부 모델 호출 후 라우팅 정보 표시 (카테고리·모델·이유·폴백 여부) |
 
 ---
 
@@ -279,4 +281,4 @@ print('refresh_token:', '✅' if t.get('refresh_token') else '❌ (만료 시 �
 | Ralph Loop | `/ralph-loop`, `/ulw-loop` | 자동 루프 커맨드 |
 | Handoff | `/handoff` | 세션 연속성 |
 | Skill System | `skills/` 디렉토리 | git-master, frontend-ui-ux, playwright |
-| Quality Hooks | `hooks/` 디렉토리 | comment-checker, write-guard |
+| Quality Hooks | `hooks/` 디렉토리 | comment-checker, write-guard, routing-display |
