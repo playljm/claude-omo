@@ -202,7 +202,7 @@ task(category="visual-engineering", load_skills=["frontend-ui-ux", "playwright"]
 | research | 코드베이스 전체 분석 | Gemini |
 | bulk | CRUD, 보일러플레이트 | GLM |
 | writing | 문서, README | GLM |
-| quick | 단순 변환, 포맷팅 | GPT none |
+| quick | 단순 변환, 포맷팅 | GLM |
 
 ---
 
@@ -219,13 +219,14 @@ task(category="visual-engineering", load_skills=["frontend-ui-ux", "playwright"]
 
 ---
 
-## Quality Hooks (v5.0 신규)
+## Quality Hooks (v5.1 업데이트)
 
 | 훅 | 타입 | 설명 |
 |----|------|------|
 | `comment-checker` | PostToolUse | AI 슬랭("이 함수는", "중요:", "주의:") 코멘트 감지 및 경고 |
 | `write-guard` | PreToolUse | 기존 파일 덮어쓰기 전 Read 여부 확인, 미확인 시 차단 |
 | `routing-display` | PostToolUse | 외부 모델 호출 후 라우팅 정보 표시 (카테고리·모델·이유·폴백 여부) |
+| `routing-pre-display` | PreToolUse | MCP 도구 호출 시작 전 `⏳ CALLING ...` 알림 표시 |
 
 ---
 

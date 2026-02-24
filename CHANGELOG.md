@@ -1,5 +1,30 @@
 # Changelog
 
+## [5.1.0] - 2026-02-24
+
+### Changed - OAuth, SSE, Routing, Progress
+
+#### OAuth 개선 (P3)
+- `api.responses.write` 스코프 체크 완전 제거 → `auth_mode` 기반 라우팅으로 대체
+- `auth_mode: 'chatgpt'`면 `chatgpt.com/backend-api/codex/responses` 사용 (Codex CLI 공식 엔드포인트)
+- `CODEX_CLIENT_ID` 하드코딩: `app_EMoamEEZ73f0CkXaXp7hrann` (@openai/codex 공식 OAuth client_id)
+- `doRefreshToken` 스코프: `openid profile email` (Codex CLI 동일)
+
+#### SSE 파서 개선 (P3)
+- `res.text()` 전체 버퍼링 → `body.getReader()` ReadableStream 청크 방식
+- 누락된 청크 경계 처리: `buffer`에 부분 라인 누적, `\n` 구분 시정
+- `response.output_text.delta` delta 우선 조합, `response.completed` 폴백
+
+#### 라우팅 개선 (P2)
+- `quick` 카테고리: GPT(none) → **GLM** 우선 (GLM → GPT 폴백)
+- 미분류 기본값: `deep`(GPT high) → **`quick`**(GLM) — 불필요한 GPT 호출 감소
+
+#### 진행 알림 (P1)
+- `sendProgress` 헬퍼: MCP ProgressNotification으로 실시간 구현
+- 모든 도구(smart_route, ask_gpt, ask_gemini, ask_glm, ask_parallel)에 호출 시작/완료 알림
+- `routing-pre-display.js` PreToolUse 훅 신규: 도구 실행 전 `⏳ CALLING ...` 메시지 표시
+
+
 ## [5.0.0] - 2026-02-24
 
 ### Added - OMO Parity Update

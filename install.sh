@@ -247,6 +247,7 @@ ulw_cmd  = f"{node_bin} {mcp_path}/ulw-detector.js 2>/dev/null || true"
 sess_cmd = f"{node_bin} {mcp_path}/session-summary.js 2>/dev/null || true"
 comment_cmd = f"{node_bin} {mcp_path}/hooks/comment-checker.js 2>/dev/null || true"
 write_guard_cmd = f"{node_bin} {mcp_path}/hooks/write-guard.js 2>/dev/null || true"
+routing_pre_cmd = f"{node_bin} {mcp_path}/hooks/routing-pre-display.js 2>/dev/null || true"
 upsert_hook(hooks, "UserPromptSubmit", ulw_cmd)
 upsert_hook(hooks, "SessionEnd", sess_cmd)
 # Quality hooks
@@ -267,9 +268,17 @@ hook_list_pre = pre_tool[0].setdefault("hooks", [])
 existing_pre = [h.get("command", "") for h in hook_list_pre]
 if not any("write-guard" in c for c in existing_pre):
     hook_list_pre.append({"type": "command", "command": write_guard_cmd})
+
+# routing-pre-display: PreToolUse, mcp__multi-model-agent__ matcher
+pre_tool2 = hooks.setdefault("PreToolUse", [])
+# 두 번째 엔트리 (matcher: mcp__multi-model-agent__)
+mcp_matcher = "mcp__multi-model-agent__"
+existing_pre2_entries = [e.get("matcher", "") for e in pre_tool2]
+if mcp_matcher not in existing_pre2_entries:
+    pre_tool2.append({"matcher": mcp_matcher, "hooks": [{"type": "command", "command": routing_pre_cmd}]})
 with open(settings_path, 'w', encoding='utf-8') as f:
     json.dump(s, f, indent=2, ensure_ascii=False)
-print(f"  가이더 훅: PostToolUse → comment-checker, PreToolUse → write-guard")
+print(f"  가이더 훅: PostToolUse → comment-checker, PreToolUse → write-guard + routing-pre-display")
 PYEOF
 info "settings.json 훅 등록 완료"
 
