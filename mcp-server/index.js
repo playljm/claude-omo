@@ -630,8 +630,7 @@ async function callSmartRoute(task, category = null, context = null, maxTokens =
       reason: CATEGORY_REASON[cat] ?? cat,
       didFallback: false,
     });
-    const header = formatRoutingHeader({ cat, model: primaryModel, effort: routing.effort });
-    return `${header}\n\n${result}`;
+    return result;
   } catch (primaryErr) {
     // Fallback 체인
     for (const fbModel of routing.fallback) {
@@ -649,8 +648,7 @@ async function callSmartRoute(task, category = null, context = null, maxTokens =
           didFallback: true,
           fallbackFrom: primaryModel,
         });
-        const header = formatRoutingHeader({ cat, model: fbModel, effort: routing.fallbackEffort, didFallback: true, fallbackFrom: primaryModel });
-        return `${header}\n\n${result}`;
+        return result;
       } catch {
         // 다음 폴백으로 계속
       }
