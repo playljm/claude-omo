@@ -149,19 +149,28 @@ cp -r "$REPO_DIR/mcp-server/." "$MCP_DIR/"
 (cd "$MCP_DIR" && npm install --silent --no-audit)
 info "MCP 서버 설치 완료 ($(node -e "console.log(require('$MCP_DIR/package.json').version)" 2>/dev/null || echo 'v4.0.0'))"
 
-# ─── 5. 에이전트 복사 ──────────────────────────────────────
+# ─── 5. 에이전트 복사 ──────────────────────
 step "에이전트 복사: $CLAUDE_DIR/agents/"
 mkdir -p "$CLAUDE_DIR/agents"
 cp "$REPO_DIR/agents/"*.md "$CLAUDE_DIR/agents/"
 AGENT_COUNT=$(ls "$CLAUDE_DIR/agents/"*.md 2>/dev/null | wc -l | tr -d ' ')
-info "에이전트 ${AGENT_COUNT}개 복사 완료"
+info "에이전트 ${AGENT_COUNT}개 복사 완료 (sisyphus+, oracle, researcher, worker, reviewer, debugger, explore, hephaestus, prometheus, atlas, metis, momus, sisyphus-junior)"
 
-# ─── 6. 커맨드 복사 ────────────────────────────────────────
+# ─── 6. 커맨드 복사 ──────────────────────
 step "커맨드 복사: $CLAUDE_DIR/commands/"
 mkdir -p "$CLAUDE_DIR/commands"
 cp "$REPO_DIR/commands/"*.md "$CLAUDE_DIR/commands/"
 CMD_COUNT=$(ls "$CLAUDE_DIR/commands/"*.md 2>/dev/null | wc -l | tr -d ' ')
-info "커맨드 ${CMD_COUNT}개 복사 완료"
+info "커맨드 ${CMD_COUNT}개 복사 완료 (plan, route, compare, ralph-loop, ulw-loop, handoff, init-deep, start-work, stop-continuation, cancel-ralph, refactor)"
+
+# ─── 6a. 스킬 복사 ─────────────────────
+step "스킬 복사: $CLAUDE_DIR/skills/"
+mkdir -p "$CLAUDE_DIR/skills"
+if [[ -d "$REPO_DIR/skills" ]]; then
+  cp -r "$REPO_DIR/skills/"* "$CLAUDE_DIR/skills/"
+  SKILL_COUNT=$(ls -d "$CLAUDE_DIR/skills/"*/  2>/dev/null | wc -l | tr -d ' ')
+  info "스킬 ${SKILL_COUNT}개 복사 완료 (git-master, frontend-ui-ux, playwright)"
+fi
 
 # ─── 7. CLAUDE.md 복사 ─────────────────────────────────────
 step "CLAUDE.md 복사: $CLAUDE_DIR/CLAUDE.md"
@@ -236,14 +245,31 @@ def upsert_hook(hooks, event, cmd):
 # node 전체 경로 사용 (nvm 환경에서 훅 실행 시 PATH 미계승 대비)
 ulw_cmd  = f"{node_bin} {mcp_path}/ulw-detector.js 2>/dev/null || true"
 sess_cmd = f"{node_bin} {mcp_path}/session-summary.js 2>/dev/null || true"
-
+comment_cmd = f"{node_bin} {mcp_path}/hooks/comment-checker.js 2>/dev/null || true"
+write_guard_cmd = f"{node_bin} {mcp_path}/hooks/write-guard.js 2>/dev/null || true"
 upsert_hook(hooks, "UserPromptSubmit", ulw_cmd)
 upsert_hook(hooks, "SessionEnd", sess_cmd)
+# Quality hooks
+post_tool = hooks.setdefault("PostToolUse", [])
+if not post_tool or not isinstance(post_tool[0], dict):
+    post_tool.clear()
+    post_tool.append({"matcher": "Write|Edit", "hooks": []})
+hook_list_post = post_tool[0].setdefault("hooks", [])
+existing_post = [h.get("command", "") for h in hook_list_post]
+if not any("comment-checker" in c for c in existing_post):
+    hook_list_post.append({"type": "command", "command": comment_cmd})
 
+pre_tool = hooks.setdefault("PreToolUse", [])
+if not pre_tool or not isinstance(pre_tool[0], dict):
+    pre_tool.clear()
+    pre_tool.append({"matcher": "Write", "hooks": []})
+hook_list_pre = pre_tool[0].setdefault("hooks", [])
+existing_pre = [h.get("command", "") for h in hook_list_pre]
+if not any("write-guard" in c for c in existing_pre):
+    hook_list_pre.append({"type": "command", "command": write_guard_cmd})
 with open(settings_path, 'w', encoding='utf-8') as f:
     json.dump(s, f, indent=2, ensure_ascii=False)
-
-print(f"  훅 등록: UserPromptSubmit (ulw-detector), SessionEnd (session-summary)")
+print(f"  가이더 훅: PostToolUse → comment-checker, PreToolUse → write-guard")
 PYEOF
 info "settings.json 훅 등록 완료"
 
@@ -372,10 +398,24 @@ echo ""
 echo "════════════════════════════════════════════════"
 info "claude-omo 설치 완료!"
 echo ""
-echo "  슬래시 커맨드:"
-echo "    /compare <질문>  — GPT·Gemini·GLM 3모델 동시 비교"
-echo "    /plan   <기능>   — Prometheus 인터뷰 기반 계획"
-echo "    /route  <작업>   — smart_route 자동 라우팅"
+echo "  슬래시 커맨드 (11개):"
+echo "    /compare <질문>      — GPT·Gemini·GLM 3모델 동시 비교"
+echo "    /plan   <기능>      — Prometheus 인터뷰 기반 계획"
+echo "    /route  <작업>      — smart_route 자동 라우팅"
+echo "    /ralph-loop <태스크> — 100% 완료까지 자동 루프"
+echo "    /ulw-loop <태스크>   — 최대 강도 ULW 루프"
+echo "    /handoff             — 세션 연속 컨텍스트 저장"
+echo "    /init-deep           — AGENTS.md 계층적 생성"
+echo "    /refactor <대상>    — LSP+AST 기반 리팩토링"
+echo "    /start-work          — Prometheus 계획 실행"
+echo "    /stop-continuation   — 자동 진행 중지"
+echo ""
+echo "  에이전트 (13개):"
+echo "    sisyphus(+IntentGate) · oracle · researcher · worker · reviewer"
+echo "    debugger · explore · hephaestus · prometheus · atlas"
+echo "    metis · momus · sisyphus-junior"
+echo ""
+echo "  스킬 (3개): git-master · frontend-ui-ux · playwright"
 echo ""
 echo "  ULW 모드: 메시지에 'ulw' 또는 'ultrawork' 포함"
 echo "  → 시지프스 모드 (TodoWrite 강제 + 병렬 에이전트)"

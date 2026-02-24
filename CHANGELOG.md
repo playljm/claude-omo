@@ -1,5 +1,38 @@
 # Changelog
 
+## [5.0.0] - 2026-02-24
+
+### Added - OMO Parity Update
+
+#### Agents (7 -> 13)
+- **hephaestus**: GPT autonomous deep worker. Goal-only input, self-directed codebase research+implementation
+- **prometheus**: Interview-mode strategic planner. Saves plans to `.claude/plans/`
+- **atlas**: TodoWrite orchestrator. Executes Prometheus plans with learning accumulation
+- **metis**: Plan gap analyzer. Identifies AI failure points, ambiguities, missing edge cases
+- **momus**: Plan reviewer. 5-criteria scoring (Clarity/Verifiability/Completeness/Ordering/Risk) 0-10
+- **sisyphus-junior**: Focused executor. Prevents delegation loops, direct execution only
+- **Sisyphus enhanced**: Added Intent Gate for proper intent classification before action
+
+#### Commands (3 -> 11)
+- **/ralph-loop**: Self-referential completion loop until 100% done (core OMO feature)
+- **/ulw-loop**: Maximum intensity ULW + parallel agents
+- **/handoff**: Save context summary for session continuity
+- **/init-deep**: Auto-generate hierarchical AGENTS.md throughout project
+- **/start-work**: Start executing Prometheus plan (Atlas mode)
+- **/refactor**: Intelligent refactoring with LSP+AST-grep+TDD verification
+- **/stop-continuation**, **/cancel-ralph**: Safety control commands
+
+#### Skills System (new)
+- **git-master**: Atomic commits, rebase surgery, history archaeology. `~/.claude/skills/git-master/SKILL.md`
+- **frontend-ui-ux**: Designer-dev persona for stunning UI. `~/.claude/skills/frontend-ui-ux/SKILL.md`
+- **playwright**: Browser automation skill. `~/.claude/skills/playwright/SKILL.md`
+
+#### Quality Hooks
+- **comment-checker**: Detects AI slop comments (`PostToolUse` -> Write/Edit)
+- **write-guard**: Prevents accidental overwrites (`PreToolUse` -> Write)
+
+---
+
 ## [4.1.0] - 2026-02-24
 
 ### Fixed
