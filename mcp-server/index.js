@@ -21,14 +21,33 @@ import {
   CallToolRequestSchema,
   ListToolsRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
-import { readFileSync, writeFileSync, existsSync, appendFileSync } from "fs";
+import { readFileSync, writeFileSync, existsSync, appendFileSync, mkdirSync } from "fs";
 import { homedir } from "os";
-import { join } from "path";
+import { join, dirname } from "path";
 
 // ───────────────────────────────────────────────
 // 토큰 사용량 로깅
 // ───────────────────────────────────────────────
 const USAGE_LOG_PATH = join(homedir(), "mcp-servers", "multi-model", "usage-log.jsonl");
+const LAST_ROUTE_PATH = join(homedir(), "mcp-servers", "multi-model", "last-route.json");
+
+// 카테고리별 한국어 이유 설명
+const CATEGORY_REASON = {
+  ultrabrain: "전체 아키텍처 설계 · 종합 전략 결정",
+  deep:       "알고리즘 분석 · 복잡한 디버깅 · 리팩토링",
+  visual:     "UI/UX · React/Vue · 프론트엔드 작업",
+  research:   "코드베이스 전체 분석 · 대용량 파일",
+  bulk:       "보일러플레이트 · CRUD · 반복 패턴 생성",
+  writing:    "문서 작성 · README · 주석 추가",
+  quick:      "단순 변환 · 포맷팅 · 즉각 처리",
+};
+
+// 모델 표시명
+const MODEL_DISPLAY = {
+  gpt:    "GPT-5.3-Codex",
+  gemini: "Gemini 2.5 Pro",
+  glm:    "GLM-4.7-Flash",
+};
 
 function logUsage(model, inputTokens, outputTokens, extra = {}) {
   const entry = {
@@ -40,10 +59,39 @@ function logUsage(model, inputTokens, outputTokens, extra = {}) {
     ...extra, // category, retry_count, routing, reasoning_effort 등
   };
   try {
+    mkdirSync(dirname(USAGE_LOG_PATH), { recursive: true });
     appendFileSync(USAGE_LOG_PATH, JSON.stringify(entry) + "\n");
   } catch {
     // 로깅 실패해도 메인 기능에 영향 없음
   }
+}
+
+// 라우팅 트레이스를 last-route.json에 저장 (routing-display.js 훅이 읽음)
+function saveRoutingTrace(trace) {
+  try {
+    mkdirSync(dirname(LAST_ROUTE_PATH), { recursive: true });
+    writeFileSync(LAST_ROUTE_PATH, JSON.stringify({ ...trace, timestamp: new Date().toISOString() }));
+  } catch {
+    // 저장 실패해도 무시
+  }
+}
+
+// 응답에 포함될 라우팅 헤더 (유니코드 박스 아트, ANSI 없음)
+function formatRoutingHeader({ cat, model, effort = null, didFallback = false, fallbackFrom = null }) {
+  const modelName = MODEL_DISPLAY[model] ?? model;
+  const effortStr = effort && effort !== "none" ? ` · reasoning: ${effort}` : "";
+  const reason = CATEGORY_REASON[cat] ?? cat;
+  const lines = [
+    `╭─ 🔀 ROUTING ──────────────────────────────────`,
+    `│  카테고리 : ${cat}`,
+    `│  모    델 : ${modelName}${effortStr}`,
+    `│  이    유 : ${reason}`,
+  ];
+  if (didFallback && fallbackFrom) {
+    lines.push(`│  ⚠ 폴백  : ${MODEL_DISPLAY[fallbackFrom] ?? fallbackFrom} 실패 → ${modelName}`);
+  }
+  lines.push(`╰──────────────────────────────────────────────`);
+  return lines.join("\n");
 }
 
 function getUsageStats(days = 7) {
@@ -574,7 +622,16 @@ async function callSmartRoute(task, category = null, context = null, maxTokens =
       category: cat,
       routing: `smart_route→${primaryModel}`,
     });
-    return `[smart_route: ${cat} → ${primaryModel}]\n\n${result}`;
+    saveRoutingTrace({
+      tool: "smart_route",
+      category: cat,
+      model: primaryModel,
+      effort: routing.effort,
+      reason: CATEGORY_REASON[cat] ?? cat,
+      didFallback: false,
+    });
+    const header = formatRoutingHeader({ cat, model: primaryModel, effort: routing.effort });
+    return `${header}\n\n${result}`;
   } catch (primaryErr) {
     // Fallback 체인
     for (const fbModel of routing.fallback) {
@@ -583,7 +640,17 @@ async function callSmartRoute(task, category = null, context = null, maxTokens =
           category: cat,
           routing: `smart_route→${primaryModel}(fail)→${fbModel}`,
         });
-        return `[smart_route: ${cat} → ${fbModel} (${primaryModel} 실패 후 폴백)]\n\n${result}`;
+        saveRoutingTrace({
+          tool: "smart_route",
+          category: cat,
+          model: fbModel,
+          effort: routing.fallbackEffort,
+          reason: CATEGORY_REASON[cat] ?? cat,
+          didFallback: true,
+          fallbackFrom: primaryModel,
+        });
+        const header = formatRoutingHeader({ cat, model: fbModel, effort: routing.fallbackEffort, didFallback: true, fallbackFrom: primaryModel });
+        return `${header}\n\n${result}`;
       } catch {
         // 다음 폴백으로 계속
       }
@@ -842,6 +909,11 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           args.models ?? null,
           args.system_prompt ?? null
         );
+        saveRoutingTrace({
+          tool: "ask_parallel",
+          model: "parallel",
+          models: args.models ?? ["gpt", "gemini", "glm"],
+        });
         break;
 
       case "ask_gpt":
@@ -852,6 +924,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           args.reasoning_effort ?? "medium",
           args.max_tokens ?? null
         );
+        saveRoutingTrace({ tool: "ask_gpt", model: "gpt", effort: args.reasoning_effort ?? "medium" });
         break;
 
       case "ask_gemini":
@@ -862,6 +935,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           args.max_tokens ?? null,
           args.temperature ?? null
         );
+        saveRoutingTrace({ tool: "ask_gemini", model: "gemini" });
         break;
 
       case "ask_glm":
@@ -872,6 +946,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           args.max_tokens ?? null,
           args.temperature ?? null
         );
+        saveRoutingTrace({ tool: "ask_glm", model: "glm" });
         break;
 
       case "get_usage_stats":
