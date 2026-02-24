@@ -540,7 +540,8 @@ async function callGemini(
 }
 
 // ───────────────────────────────────────────────
-// callGlm — OpenAI 호환 Chat Completions (Z.ai)
+// callGlm — OpenAI 호환 Chat Completions (Z.ai Coding Plan)
+// /api/coding/paas/v4 → 구독 쿼터 사용 (별도 크레딧 불필요)
 // ───────────────────────────────────────────────
 async function callGlm(
   prompt,
@@ -565,7 +566,7 @@ async function callGlm(
   if (temperature !== null) body.temperature = temperature;
 
   const { res, retryCount } = await fetchWithRetry(
-    "https://api.z.ai/api/paas/v4/chat/completions",
+    "https://api.z.ai/api/coding/paas/v4/chat/completions",
     {
       method: "POST",
       headers: {
