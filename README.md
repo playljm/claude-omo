@@ -81,7 +81,7 @@ auth.json 구조:
 |------|--------|------|-----------|
 | GPT | `gpt-5.3-codex` | OAuth JWT | `~/.codex/auth.json` |
 | Gemini | `gemini-2.5-pro` | API Key | `settings.json mcpServers.env` |
-| GLM | `glm-4.7-flash` | API Key | `settings.json mcpServers.env` |
+| GLM | `glm-5` | API Key | `settings.json mcpServers.env` |
 
 ---
 
