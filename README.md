@@ -1,11 +1,13 @@
 # claude-omo
 
-**OMO(oh-my-opencode) 스타일 멀티모델 오케스트레이션 — Claude Code 네이티브 구현 v5.0**
+**OMO(oh-my-opencode) 스타일 멀티모델 오케스트레이션 — Claude Code 네이티브 구현 v5.1**
 
 GPT / Gemini / GLM 세 모델을 카테고리 기반으로 자동 라우팅하고,
 OMO의 핵심 에이전트 패턴을 Claude Code 프리미티브로 이식한 설정 모음.
 
 **v5.0**: 에이전트 7→13개, 커맨드 3→11개, 스킬 시스템 신규 추가, OMO 패리티 ~90% 달성.
+
+**v5.1**: OAuth 개선(스코프 체크 제거), SSE ReadableStream 파서, quick 커테고리 GLM 전환, MCP 진행 알림(⏳ CALLING).
 
 ---
 
@@ -92,14 +94,15 @@ claude-omo/
 ├── install.sh                   # 원클릭 설치 스크립트
 ├── CLAUDE.md                    # ~/.claude/CLAUDE.md 라우팅 규칙
 ├── TROUBLESHOOT.md              # Linux 서버 문제 해결 가이드
-├── mcp-server/                  # Multi-Model MCP 서버 v5.0
+├── mcp-server/                  # Multi-Model MCP 서버 v5.1
 │   ├── index.js                 # smart_route, ask_parallel, fetchWithRetry
 │   ├── ulw-detector.js          # ULW 모드 훅 (UserPromptSubmit)
 │   ├── session-summary.js       # 세션 요약
-│   └── hooks/                   # Quality Hooks (NEW v5.0)
+│   └── hooks/                   # Quality Hooks (v5.1 업데이트)
 │       ├── comment-checker.js   # AI 슬랭 코멘트 감지 (PostToolUse)
 │       ├── write-guard.js       # 기존 파일 덮어쓰기 방지 (PreToolUse)
-│       └── routing-display.js   # 라우팅 가시화 (PostToolUse)
+│       ├── routing-display.js   # 라우팅 가시화 (PostToolUse)
+│       └── routing-pre-display.js # 호출 시작 알림 (PreToolUse) [v5.1]
 ├── agents/                      # ~/.claude/agents/ 에 복사 (13개)
 │   ├── sisyphus.md              # 멀티에이전트 오케스트레이터 + Intent Gate
 │   ├── sisyphus-junior.md       # 집중 실행자 (위임 루프 방지) [NEW]
@@ -264,7 +267,7 @@ print('refresh_token:', '✅' if t.get('refresh_token') else '❌ (만료 시 �
 
 ## OMO 대응표
 
-| OMO | claude-omo v5.0 | 비고 |
+| OMO | claude-omo v5.1 | 비고 |
 |-----|----------------|------|
 | Sisyphus (오케스트레이터) | `sisyphus` + `sisyphus-junior` | Intent Gate 추가 |
 | Oracle (아키텍처 컨설턴트) | `oracle` | — |
@@ -282,4 +285,4 @@ print('refresh_token:', '✅' if t.get('refresh_token') else '❌ (만료 시 �
 | Ralph Loop | `/ralph-loop`, `/ulw-loop` | 자동 루프 커맨드 |
 | Handoff | `/handoff` | 세션 연속성 |
 | Skill System | `skills/` 디렉토리 | git-master, frontend-ui-ux, playwright |
-| Quality Hooks | `hooks/` 디렉토리 | comment-checker, write-guard, routing-display |
+| Quality Hooks | `hooks/` 디렉토리 | comment-checker, write-guard, routing-display, **routing-pre-display** [v5.1] |
