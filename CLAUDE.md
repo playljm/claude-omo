@@ -24,16 +24,15 @@ smart_route(task="전체 아키텍처를 분석해줘")
 |------------|----------------------------------------|--------------|-----------|
 | ultrabrain | 아키텍처 설계, 전체 전략 결정, 종합 계획   | GPT          | xhigh     |
 | deep       | 알고리즘, 복잡한 디버깅, 리팩토링 분석    | GPT          | high      |
-| visual     | UI/UX, React/Vue, 프론트엔드, CSS 레이아웃| Gemini       | —         |
-| research   | 코드베이스 전체 분석, 200줄↑ 파일        | Gemini       | —         |
+| visual     | UI/UX, React/Vue, 프론트엔드, CSS 레이아웃| GPT          | high      |
+| research   | 코드베이스 전체 분석, 200줄↑ 파일        | GPT          | high      |
 | bulk       | 보일러플레이트, CRUD 2개↑, 반복 패턴     | GLM          | —         |
 | writing    | 문서 작성, README, 주석 추가             | GLM          | —         |
 | quick      | 단순 변환, 포맷팅                        | GPT          | none      |
 
 **폴백 체인**: primary 실패 시 자동 시도
-- ultrabrain/deep: GPT → Gemini
-- visual/research: Gemini → GPT
-- bulk/writing: GLM → Gemini
+- ultrabrain/deep/visual/research: GPT → GLM
+- bulk/writing: GLM → GPT
 - quick: GPT → GLM
 
 ---
@@ -41,10 +40,10 @@ smart_route(task="전체 아키텍처를 분석해줘")
 ### 위임 판단 기준 (빠른 체크)
 
 ```
-파일 200줄 이상?          → ask_gemini  (research)
-같은 패턴 2개 이상?       → ask_glm     (bulk)
+파일 200줄 이상?          → ask_gpt(high) (research)
+같은 패턴 2개 이상?       → ask_glm       (bulk)
 Sonnet이 1번 막혔나?      → ask_gpt(high)
-UI/프론트 작업?           → ask_gemini  (visual)  [무조건]
+UI/프론트 작업?           → ask_gpt(high) (visual)
 아키텍처 최종 결정?       → ask_gpt(xhigh)        [무조건]
 교차 검증 필요?           → ask_parallel
 그 외 불확실한 모든 것    → smart_route
@@ -53,11 +52,6 @@ UI/프론트 작업?           → ask_gemini  (visual)  [무조건]
 ---
 
 ### 직접 위임 가이드 (smart_route 없이)
-
-**`ask_gemini`** — 컨텍스트 크기가 문제일 때
-- 단일 파일 200줄 이상, 여러 대형 파일 동시 분석
-- 모든 React/Vue/프론트엔드 작업 (무조건)
-- 코드베이스 전체 구조 파악
 
 **`ask_glm`** — 반복·볼륨 작업
 - 동일 패턴 2개 이상 (라우터, 컨트롤러, 모델 등)
@@ -81,9 +75,9 @@ UI/프론트 작업?           → ask_gemini  (visual)  [무조건]
 ```
 ask_parallel(
   prompt="이 알고리즘을 최적화하는 방법은?",
-  models=["gpt", "gemini", "glm"]
+  models=["gpt", "glm"]
 )
-→ 3개 응답 동시 수신 → 공통 지적사항 = 확실한 개선점
+→ 2개 응답 동시 수신 → 공통 지적사항 = 확실한 개선점
 ```
 
 사용 시점: 코드 리뷰, 아키텍처 의견 수렴, 중요한 기술 결정의 교차 검증
@@ -116,6 +110,6 @@ ask_parallel(
 
 **사용 가능한 전문 에이전트** (`.claude/agents/`):
 - `oracle`     — GPT(xhigh) 아키텍처 컨설턴트 (읽기 전용)
-- `researcher` — Gemini 대규모 코드 분석 (읽기 전용)
+- `researcher` — GPT(high) 대규모 코드 분석 (읽기 전용)
 - `worker`     — GLM + 구현 도구 (모든 도구)
 - `reviewer`   — ask_parallel 코드 리뷰 (읽기 전용)
