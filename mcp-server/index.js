@@ -3,15 +3,14 @@
  * Multi-Model MCP Server v4.0
  *
  * 연결 모델:
- *   - GPT-5.3-Codex  : ChatGPT OAuth (~/.codex/auth.json) → Responses API /v1/responses
- *   - Gemini 2.5 Pro : AI Studio API Key → OpenAI 호환 엔드포인트
- *   - GLM-5          : Z.ai API Key     → OpenAI 호환 엔드포인트
+ *   - GPT-5.3-Codex : ChatGPT OAuth (~/.codex/auth.json) → Responses API /v1/responses
+ *   - GLM-5         : Z.ai API Key → OpenAI 호환 엔드포인트
  *
  * v4.0 신규:
  *   - fetchWithRetry: 429/500/502/503/529 → 최대 3회 재시도, 지수 백오프
  *   - smart_route   : 카테고리 기반 자동 라우팅 + 폴백 체인
  *   - ask_parallel  : Promise.allSettled() 다중 모델 동시 호출
- *   - 확장 파라미터 : max_tokens, temperature (Gemini/GLM), max_tokens (GPT)
+ *   - 확장 파라미터 : max_tokens, temperature (GLM), max_tokens (GPT)
  *   - 강화 로깅     : category, retry_count, routing 필드 추가
  */
 
@@ -357,58 +356,6 @@ async function callGpt(
 }
 
 // ───────────────────────────────────────────────
-// callGemini — OpenAI 호환 Chat Completions
-// ───────────────────────────────────────────────
-async function callGemini(
-  prompt,
-  model = "gemini-2.5-pro",
-  systemPrompt = null,
-  maxTokens = null,
-  temperature = null,
-  logExtra = {}
-) {
-  const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey) {
-    throw new Error(
-      "GEMINI_API_KEY 환경변수 없음. ~/.bashrc에 export GEMINI_API_KEY='키값' 추가 후 터미널 재시작."
-    );
-  }
-
-  const messages = [];
-  if (systemPrompt) messages.push({ role: "system", content: systemPrompt });
-  messages.push({ role: "user", content: prompt });
-
-  const body = { model, messages, max_tokens: maxTokens ?? 8192 };
-  if (temperature !== null) body.temperature = temperature;
-
-  const { res, retryCount } = await fetchWithRetry(
-    "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
-    {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(body),
-    }
-  );
-
-  if (!res.ok) {
-    const err = await res.text();
-    throw new Error(`Gemini API 오류 (HTTP ${res.status}): ${err}`);
-  }
-
-  const data = await res.json();
-  const usage = data.usage ?? {};
-  logUsage(model, usage.prompt_tokens ?? 0, usage.completion_tokens ?? 0, {
-    retry_count: retryCount,
-    ...logExtra,
-  });
-
-  return data.choices?.[0]?.message?.content ?? "응답 없음";
-}
-
-// ───────────────────────────────────────────────
 // callGlm — OpenAI 호환 Chat Completions (Z.ai / bigmodel.cn 유료 플랜)
 // /api/paas/v4 → 표준 유료 API 엔드포인트 (크레딧 차감 방식)
 // ───────────────────────────────────────────────
@@ -477,13 +424,13 @@ const CATEGORY_PATTERNS = {
 // 카테고리 → 라우팅 설정
 // fallbackEffort: 폴백 모델이 GPT일 때 사용할 reasoning_effort
 const CATEGORY_ROUTING = {
-  ultrabrain: { model: "gpt",    effort: "xhigh", fallback: ["gemini"], fallbackEffort: "high"   },
-  deep:       { model: "gpt",    effort: "high",  fallback: ["gemini"], fallbackEffort: null      },
-  visual:     { model: "gemini", effort: null,     fallback: ["gpt"],    fallbackEffort: "high"   },
-  research:   { model: "gemini", effort: null,     fallback: ["gpt"],    fallbackEffort: "high"   },
-  bulk:       { model: "glm",    effort: null,     fallback: ["gemini"], fallbackEffort: null      },
-  writing:    { model: "glm",    effort: null,     fallback: ["gemini"], fallbackEffort: null      },
-  quick:      { model: "gpt",    effort: "none",   fallback: ["glm"],    fallbackEffort: null      },
+  ultrabrain: { model: "gpt",  effort: "xhigh", fallback: ["glm"],  fallbackEffort: null },
+  deep:       { model: "gpt",  effort: "high",  fallback: ["glm"],  fallbackEffort: null },
+  visual:     { model: "gpt",  effort: "high",  fallback: ["glm"],  fallbackEffort: null },
+  research:   { model: "gpt",  effort: "high",  fallback: ["glm"],  fallbackEffort: null },
+  bulk:       { model: "glm",  effort: null,     fallback: ["gpt"],  fallbackEffort: "medium" },
+  writing:    { model: "glm",  effort: null,     fallback: ["gpt"],  fallbackEffort: "medium" },
+  quick:      { model: "gpt",  effort: "none",   fallback: ["glm"],  fallbackEffort: null },
 };
 
 function classifyCategory(task) {
@@ -503,8 +450,7 @@ async function callSmartRoute(task, category = null, context = null, maxTokens =
     switch (model) {
       case "gpt":
         return callGpt(fullPrompt, "gpt-5.3-codex", null, effort ?? "medium", maxTokens, logExtra);
-      case "gemini":
-        return callGemini(fullPrompt, "gemini-2.5-pro", null, maxTokens, null, logExtra);
+      // gemini removed
       case "glm":
         return callGlm(fullPrompt, "glm-5", null, maxTokens, null, logExtra);
       default:
@@ -540,16 +486,15 @@ async function callSmartRoute(task, category = null, context = null, maxTokens =
 // ask_parallel — Promise.allSettled() 다중 모델 동시 호출
 // ───────────────────────────────────────────────
 async function callAskParallel(prompt, models = null, systemPrompt = null) {
-  const ALL_MODELS = ["gpt", "gemini", "glm"];
+  const ALL_MODELS = ["gpt", "glm"];
   const selectedModels = (models ?? ALL_MODELS).filter((m) => ALL_MODELS.includes(m));
   if (selectedModels.length === 0) selectedModels.push(...ALL_MODELS);
 
   const logExtra = { routing: "ask_parallel" };
 
   const modelCalls = {
-    gpt:    () => callGpt(prompt, "gpt-5.3-codex", systemPrompt, "medium", null, logExtra),
-    gemini: () => callGemini(prompt, "gemini-2.5-pro", systemPrompt, null, null, logExtra),
-    glm:    () => callGlm(prompt, "glm-5", systemPrompt, null, null, logExtra),
+    gpt: () => callGpt(prompt, "gpt-5.3-codex", systemPrompt, "medium", null, logExtra),
+    glm: () => callGlm(prompt, "glm-5", systemPrompt, null, null, logExtra),
   };
 
   const results = await Promise.allSettled(selectedModels.map((m) => modelCalls[m]()));
@@ -583,17 +528,16 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
         "【카테고리 → 모델 매핑】",
         "- ultrabrain : GPT(xhigh) — 전체 아키텍처 설계, 종합 전략",
         "- deep       : GPT(high)  — 알고리즘, 복잡한 디버깅, 리팩토링",
-        "- visual     : Gemini     — UI/UX, React/Vue, 프론트엔드",
-        "- research   : Gemini     — 코드베이스 전체 분석, 대규모 파일",
+        "- visual     : GPT(high)  — UI/UX, React/Vue, 프론트엔드",
+        "- research   : GPT(high)  — 코드베이스 전체 분석, 대규모 파일",
         "- bulk       : GLM        — 보일러플레이트, CRUD, 반복 패턴",
         "- writing    : GLM        — 문서, README, 주석 추가",
         "- quick      : GPT(none)  — 단순 변환, 포맷팅",
         "",
         "【폴백 체인】 primary 실패 시 자동 폴백",
-        "- ultrabrain/deep → GPT → Gemini",
-        "- visual/research → Gemini → GPT",
-        "- bulk/writing    → GLM → Gemini",
-        "- quick           → GPT → GLM",
+        "- ultrabrain/deep/visual/research → GPT → GLM",
+        "- bulk/writing                   → GLM → GPT",
+        "- quick                          → GPT → GLM",
       ].join("\n"),
       inputSchema: {
         type: "object",
@@ -618,7 +562,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
         "같은 프롬프트를 여러 모델에 동시 전송하여 응답을 비교합니다.",
         "코드 리뷰, 아키텍처 교차 검증, 중요한 기술 결정에 유용합니다.",
         "",
-        "출력: === GPT [OK] === / === GEMINI [FAIL] === 형식으로 각 모델 응답 구분",
+        "출력: === GPT [OK] === / === GLM [FAIL] === 형식으로 각 모델 응답 구분",
       ].join("\n"),
       inputSchema: {
         type: "object",
@@ -626,8 +570,8 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
           prompt: { type: "string", description: "모든 모델에게 전달할 프롬프트 (필수)" },
           models: {
             type: "array",
-            items: { type: "string", enum: ["gpt", "gemini", "glm"] },
-            description: "사용할 모델 목록 (선택, 기본: 전체 [gpt, gemini, glm])",
+            items: { type: "string", enum: ["gpt", "glm"] },
+            description: "사용할 모델 목록 (선택, 기본: 전체 [gpt, glm])",
           },
           system_prompt: { type: "string", description: "시스템 프롬프트 (선택)" },
         },
@@ -679,38 +623,6 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
       },
     },
 
-    // ─── ask_gemini ───────────────────────────────
-    {
-      name: "ask_gemini",
-      description: [
-        "Gemini 2.5 Pro에게 작업을 위임합니다 (AI Studio API Key).",
-        "",
-        "【핵심 강점 - 이 상황에서 반드시 사용할 것】",
-        "- 200줄 이상 파일/코드베이스 전체 분석 (1M 토큰 컨텍스트)",
-        "- 여러 파일을 한 번에 넘겨 전체 구조 파악",
-        "- React/Vue/Tailwind UI 컴포넌트 및 화면 설계",
-        "- 긴 문서 요약 및 비교 분석",
-        "",
-        "【Sonnet 대신 이 툴을 쓸 것】",
-        "파일이 길거나, 여러 파일을 동시에 분석해야 할 때.",
-      ].join("\n"),
-      inputSchema: {
-        type: "object",
-        properties: {
-          prompt: { type: "string", description: "Gemini에게 전달할 작업 내용" },
-          model: {
-            type: "string",
-            description: "사용할 Gemini 모델",
-            default: "gemini-2.5-pro",
-          },
-          system_prompt: { type: "string", description: "시스템 프롬프트 (선택사항)" },
-          max_tokens: { type: "number", description: "최대 출력 토큰 수 (기본값: 8192)" },
-          temperature: { type: "number", description: "온도 파라미터 0.0~2.0 (선택)" },
-        },
-        required: ["prompt"],
-      },
-    },
-
     // ─── ask_glm ──────────────────────────────────
     {
       name: "ask_glm",
@@ -748,7 +660,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
     {
       name: "get_usage_stats",
       description: [
-        "외부 모델(GLM/Gemini/GPT) 토큰 사용량 통계를 조회합니다.",
+        "외부 모델(GLM/GPT) 토큰 사용량 통계를 조회합니다.",
         "모델별 호출 수, 입력/출력 토큰, 비율, 카테고리별 분류 현황을 보여줍니다.",
       ].join("\n"),
       inputSchema: {
@@ -803,16 +715,6 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         );
         break;
 
-      case "ask_gemini":
-        result = await callGemini(
-          args.prompt,
-          args.model ?? "gemini-2.5-pro",
-          args.system_prompt ?? null,
-          args.max_tokens ?? null,
-          args.temperature ?? null
-        );
-        break;
-
       case "ask_glm":
         result = await callGlm(
           args.prompt,
@@ -845,19 +747,17 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     if (m) {
       callMeta.category = m[1];
       const mdl = m[2];
-      callMeta.model   = mdl === "gpt" ? "gpt-5.3-codex" : mdl === "gemini" ? "gemini-2.5-pro" : "glm-5";
+      callMeta.model   = mdl === "gpt" ? "gpt-5.3-codex" : "glm-5";
       callMeta.routing = "smart_route\u2192" + mdl;
     }
   } else if (name === "ask_gpt") {
     callMeta.model            = args?.model ?? "gpt-5.3-codex";
     callMeta.reasoning_effort = args?.reasoning_effort ?? "medium";
-  } else if (name === "ask_gemini") {
-    callMeta.model = args?.model ?? "gemini-2.5-pro";
   } else if (name === "ask_glm") {
     callMeta.model = args?.model ?? "glm-5";
   } else if (name === "ask_parallel") {
     callMeta.model  = "parallel";
-    callMeta.models = args?.models ?? ["gpt", "gemini", "glm"];
+    callMeta.models = args?.models ?? ["gpt", "glm"];
   }
 
   try { writeFileSync(LAST_CALL_PATH, JSON.stringify(callMeta, null, 2)); } catch {}
