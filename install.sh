@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # ============================================================
 # claude-omo installer
-# GPT / Gemini / GLM 멀티모델 오케스트레이션 원클릭 설치
+# GPT / GLM 멀티모델 오케스트레이션 원클릭 설치
 # ============================================================
 set -euo pipefail
 
@@ -115,7 +115,6 @@ collect_key() {
   fi
 }
 
-GEMINI_KEY=$(collect_key "GEMINI_API_KEY" "https://aistudio.google.com/apikey")
 GLM_KEY=$(collect_key "GLM_API_KEY" "https://open.bigmodel.cn")
 OPENAI_KEY=$(collect_key "OPENAI_API_KEY" "https://platform.openai.com/api-keys")
 
@@ -133,12 +132,10 @@ if [[ -f "$_EXISTING_SETTINGS" ]]; then
   _get_existing_key() {
     $PYTHON_CMD -c "import json; s=json.load(open('$_EXISTING_SETTINGS')); print(s.get('mcpServers',{}).get('multi-model-agent',{}).get('env',{}).get('$1',''))" 2>/dev/null || echo ""
   }
-  [[ -z "$GEMINI_KEY" ]] && GEMINI_KEY=$(_get_existing_key "GEMINI_API_KEY") && [[ -n "$GEMINI_KEY" ]] && warn "GEMINI_API_KEY: settings.json 기존 키 재사용" >&2 || true
   [[ -z "$GLM_KEY"    ]] && GLM_KEY=$(_get_existing_key "GLM_API_KEY")    && [[ -n "$GLM_KEY"    ]] && warn "GLM_API_KEY: settings.json 기존 키 재사용" >&2 || true
   [[ -z "$OPENAI_KEY" ]] && OPENAI_KEY=$(_get_existing_key "OPENAI_API_KEY") && [[ -n "$OPENAI_KEY" ]] && warn "OPENAI_API_KEY: settings.json 기존 키 재사용" >&2 || true
 fi
 
-[[ -n "$GEMINI_KEY"  ]] && info "GEMINI_API_KEY 수집됨"  || warn "GEMINI_API_KEY 건너뜀 (나중에 수동 설정 필요)"
 [[ -n "$GLM_KEY"     ]] && info "GLM_API_KEY 수집됨"     || warn "GLM_API_KEY 건너뜀 (나중에 수동 설정 필요)"
 [[ -n "$OPENAI_KEY"  ]] && info "OPENAI_API_KEY 수집됨"  || warn "OPENAI_API_KEY 건너뜀 (GPT는 ~/.codex/auth.json 으로 폴백)"
 
@@ -294,7 +291,6 @@ if command -v claude &>/dev/null; then
   # 주의: 이름(multi-model-agent)이 -e 플래그보다 먼저 와야 함
   # (claude mcp add의 <env...> 가변인자가 이름을 env값으로 잘못 파싱하는 버그 방지)
   _mcp_add_args=(claude mcp add --scope user multi-model-agent)
-  [[ -n "$GEMINI_KEY"  ]] && _mcp_add_args+=(-e "GEMINI_API_KEY=$GEMINI_KEY")
   [[ -n "$GLM_KEY"     ]] && _mcp_add_args+=(-e "GLM_API_KEY=$GLM_KEY")
   [[ -n "$OPENAI_KEY"  ]] && _mcp_add_args+=(-e "OPENAI_API_KEY=$OPENAI_KEY")
   _mcp_add_args+=(-- "$NODE_BIN_WIN" "$MCP_NODE_PATH/index.js")
@@ -315,10 +311,10 @@ fi
 
 if [[ "$MCP_REGISTERED" == "false" ]]; then
   warn "settings.json 직접 편집으로 MCP 등록 (claude CLI 미사용 또는 실패 시 폴백)"
-  $PYTHON_CMD - "$SETTINGS_WIN" "$MCP_NODE_PATH" "$GEMINI_KEY" "$GLM_KEY" "$NODE_BIN_WIN" "$OPENAI_KEY" <<'PYEOF'
+  $PYTHON_CMD - "$SETTINGS_WIN" "$MCP_NODE_PATH" "$GLM_KEY" "$NODE_BIN_WIN" "$OPENAI_KEY" <<'PYEOF'
 import json, sys
 
-settings_path, mcp_path, gemini_key, glm_key, node_bin, openai_key = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4], sys.argv[5], sys.argv[6]
+settings_path, mcp_path, glm_key, node_bin, openai_key = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4], sys.argv[5]
 
 try:
     with open(settings_path, 'r', encoding='utf-8') as f:
@@ -331,7 +327,6 @@ mcp_servers = s.setdefault("mcpServers", {})
 # 기존 env 보존 후 업데이트
 existing_env = mcp_servers.get("multi-model-agent", {}).get("env", {})
 mcp_env = {}
-if gemini_key: mcp_env["GEMINI_API_KEY"] = gemini_key
 if glm_key:    mcp_env["GLM_API_KEY"]    = glm_key
 if openai_key: mcp_env["OPENAI_API_KEY"] = openai_key
 for k, v in existing_env.items():
@@ -403,15 +398,16 @@ echo ""
 echo "════════════════════════════════════════════════"
 info "claude-omo 설치 완료!"
 echo ""
-echo "  슬래시 커맨드 (13개):"
-echo "    /compare <질문>      — GPT·Gemini·GLM 3모델 동시 비교"
+echo "  슬래시 커맨드 (14개):"
+echo "    /compare <질문>      — GPT·GLM 2모델 동시 비교"
 echo "    /plan   <기능>      — Prometheus 인터뷰 기반 계획"
 echo "    /route  <작업>      — smart_route 자동 라우팅"
 echo "    /ralph-loop <태스크> — 100% 완료까지 자동 루프"
 echo "    /ulw-loop <태스크>   — 최대 강도 ULW 루프"
 echo "    /handoff             — 세션 연속 컨텍스트 저장"
 echo "    /init-deep           — AGENTS.md 계층적 생성"
-echo "    /refactor <대상>    — LSP+AST 기반 리팩토링"
+echo "    /refactor <대상>    — 지능형 리팩토링 (Grep+Edit 기반)"
+echo "    /update-omo [msg]    — 변경사항 배포 + GitHub push"
 echo "    /start-work          — Prometheus 계획 실행"
 echo "    /stop-continuation   — 자동 진행 중지"
 echo "    /finish              — 작업 마무리 체크리스트"

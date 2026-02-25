@@ -1,5 +1,5 @@
 ---
-description: Intelligent refactoring with LSP, AST-grep, architecture analysis, and TDD verification. Usage: /refactor <target> [--scope=file|module|project] [--strategy=safe|aggressive]
+description: Intelligent refactoring with architecture analysis and TDD verification. Usage: /refactor <target> [--scope=file|module|project] [--strategy=safe|aggressive]
 ---
 
 # Intelligent Refactoring
@@ -10,14 +10,14 @@ description: Intelligent refactoring with LSP, AST-grep, architecture analysis, 
 
 ### 1.1 Understand Current State
 - Read the target code thoroughly with `Read`
-- Use `lsp_find_references` to find ALL usages across workspace
-- Use `lsp_symbols` to understand structure
-- Use `ast_grep_search` to find patterns
+- Use `Grep` to find ALL usages across workspace
+- Use `Glob` to map file structure
 
-```
-lsp_find_references(file, line, character)
-lsp_symbols(filePath, scope="workspace", query="TargetName")
-ast_grep_search(pattern="fn $NAME($$$) { $$$ }", lang="rust")
+```bash
+# 심볼 참조 찾기
+Grep("TargetFunctionName", output_mode="content")
+# 관련 파일 파악
+Glob("**/*.{ts,js,py}")
 ```
 
 ### 1.2 Architecture Assessment via Oracle
@@ -36,9 +36,12 @@ Task(subagent_type="oracle", prompt="
 ```
 **ALL existing tests must still pass after refactoring.**
 
-### 1.4 Check for Diagnostics
-```
-lsp_diagnostics(filePath="target/file.ts", severity="all")
+### 1.4 Check for Type/Lint Errors
+```bash
+# TypeScript 프로젝트
+npx tsc --noEmit 2>&1
+# JS/Python
+npx eslint src/ 2>&1  또는  ruff check . 2>&1
 ```
 
 ## Phase 2: Plan
@@ -52,22 +55,24 @@ Create TodoWrite with:
 ## Phase 3: Execute (Incremental)
 
 For EACH change:
-1. Make the change (prefer `lsp_rename` for symbol renames)
-2. Check diagnostics immediately: `lsp_diagnostics`
+1. Make the change with `Edit` (검증된 old_string 사용)
+2. 변경 후 즉시 Grep으로 누락 참조 확인
 3. Run tests
 4. If tests fail → revert that specific change → try alternative approach
 
-**Use LSP tools for precision**:
-- Symbol rename → `lsp_rename` (propagates to ALL usages automatically)
-- Find all callers → `lsp_find_references`
-- Structural rewrite → `ast_grep_replace` (dry run first with `dryRun: true`)
+**심볼 전체 rename 시**:
+```bash
+# Grep으로 전체 참조 수 파악
+Grep("OldName", output_mode="count")
+# Edit replace_all=true 또는 Bash sed로 일괄 치환
+```
 
 ## Phase 4: Verify
 
 Final checklist:
-- [ ] `lsp_diagnostics` — zero errors
+- [ ] Type/lint check — zero errors
 - [ ] All existing tests pass
-- [ ] No new lint warnings
+- [ ] No new warnings
 - [ ] Behavior preserved (same inputs → same outputs)
 - [ ] Code is simpler/cleaner than before
 
@@ -92,4 +97,4 @@ Only refactor the specified file, no cross-file changes.
 Refactor within the directory boundary.
 
 ### `--scope=project`
-Full workspace refactoring — requires `lsp_rename` for all symbol changes.
+Full workspace refactoring — use Grep+Edit replace_all for all symbol changes.

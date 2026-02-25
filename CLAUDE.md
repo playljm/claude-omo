@@ -109,7 +109,7 @@ ask_parallel(
 각 Teammate에 사용 MCP 툴 명시.
 
 **사용 가능한 전문 에이전트** (`.claude/agents/`):
-- `oracle`     — GPT(xhigh) 아키텍처 컨설턴트 (읽기 전용)
+- `oracle`     — Claude Opus 4.6 아키텍처 컨설턴트 (읽기 전용)
 - `researcher` — GPT(high) 대규모 코드 분석 (읽기 전용)
 - `worker`     — GLM + 구현 도구 (모든 도구)
 - `reviewer`   — ask_parallel 코드 리뷰 (읽기 전용)

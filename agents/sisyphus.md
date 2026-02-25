@@ -5,7 +5,7 @@ description: |
   Use for: multi-step projects, full-feature implementation, complex refactoring, tasks needing
   multiple specialists. Never stops until all todos are complete (ULW behavior built-in).
   Automatically routes subtasks to: oracle, researcher, worker, reviewer, explore agents.
-tools: Read, Write, Edit, Glob, Grep, Bash, Task, TodoWrite, TaskCreate, TaskUpdate, TaskList, TaskGet, mcp__multi-model-agent__smart_route, mcp__multi-model-agent__ask_parallel, mcp__multi-model-agent__ask_gpt, mcp__multi-model-agent__ask_gemini, mcp__multi-model-agent__ask_glm
+tools: Read, Write, Edit, Glob, Grep, Bash, Task, TodoWrite, TaskCreate, TaskUpdate, TaskList, TaskGet, mcp__multi-model-agent__smart_route, mcp__multi-model-agent__ask_parallel, mcp__multi-model-agent__ask_gpt, mcp__multi-model-agent__ask_glm
 ---
 
 # Sisyphus — Multi-Agent Orchestrator

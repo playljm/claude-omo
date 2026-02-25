@@ -1,5 +1,29 @@
 # Changelog
 
+## [5.3.1] - 2026-02-25
+
+### Fixed - Gemini 제거 정합성 수정 및 문서 클린업
+
+#### 버그 수정 (Critical)
+- **`researcher.md` 동작 불가**: `ask_gemini` MCP 툴이 존재하지 않음에도 tools frontmatter에 등록되어 에이전트 호출 시 "알 수 없는 툴" 오류 발생 → `ask_gpt(high)`로 교체
+- **`sisyphus.md` / `sisyphus-junior.md`**: tools frontmatter에서 `ask_gemini` 제거
+- **`reviewer.md`**: `models=["gpt","gemini","glm"]` → `["gpt","glm"]` 수정 (gemini 호출 시 실패)
+
+#### 문서 정합성 수정
+- **`README.md`**: 라우팅 테이블 `visual`/`research` → Gemini(오류) → GPT high(정확), 에이전트/MCP 도구 테이블 전체 현실 반영
+- **`CLAUDE.md`**: `oracle` 모델 설명 "GPT xhigh" → "Claude Opus 4.6" (oracle은 MCP 미사용, Opus 서브에이전트)
+- **`commands/compare.md`**: "GPT/Gemini/GLM 3모델" → "GPT/GLM 2모델"
+- **`mcp-server/index.js`**: 서버 버전 `4.0.0` → `5.3.0`
+
+#### 커맨드 개선
+- **`commands/refactor.md`**: 존재하지 않는 LSP 도구(`lsp_find_references`, `lsp_rename`, `ast_grep_*`) → Claude Code 네이티브 도구(Grep, Edit, Bash)로 전면 재작성
+- **`commands/finish.md`**: private 서버 IP(100.70.193.60) 및 JARVIS 섹션 제거 (공개 레포 정리)
+
+#### 설치 스크립트
+- **`install.sh`**: GEMINI_API_KEY 수집/주입 로직 완전 제거, 커맨드 수 13→14 수정
+
+---
+
 ## [5.3.0] - 2026-02-25
 
 ### Fixed - 훅 등록 버그 수정 및 모델 가시성 개선

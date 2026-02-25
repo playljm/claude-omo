@@ -2,7 +2,7 @@
 
 **OMO(oh-my-opencode) 스타일 멀티모델 오케스트레이션 — Claude Code 네이티브 구현 v5.3**
 
-GPT / Gemini / GLM 세 모델을 카테고리 기반으로 자동 라우팅하고,
+GPT / GLM 두 모델을 카테고리 기반으로 자동 라우팅하고,
 OMO의 핵심 에이전트 패턴을 Claude Code 프리미티브로 이식한 설정 모음.
 
 **v5.0**: 에이전트 7→13개, 커맨드 3→11개, 스킬 시스템 신규 추가, OMO 패리티 ~90% 달성.
@@ -57,7 +57,6 @@ C:\dev\claude-omo\update.bat
 |------|------|
 | Claude Code CLI | `npm install -g @anthropic-ai/claude-code` |
 | Node.js | 18 이상 |
-| GEMINI_API_KEY | [AI Studio](https://aistudio.google.com/apikey) 발급 |
 | GLM_API_KEY | [Z.ai](https://open.bigmodel.cn) 발급 |
 | GPT 인증 | `~/.codex/auth.json` (아래 참고) |
 
@@ -98,7 +97,6 @@ auth.json 구조:
 | 모델 | 모델명 | 인증 | 설정 위치 |
 |------|--------|------|-----------|
 | GPT | `gpt-5.3-codex` | OAuth JWT | `~/.codex/auth.json` |
-| Gemini | `gemini-2.5-pro` | API Key | `settings.json mcpServers.env` |
 | GLM | `glm-5` | API Key | `settings.json mcpServers.env` |
 
 ---
@@ -123,13 +121,13 @@ claude-omo/
 ├── agents/                      # ~/.claude/agents/ 에 복사 (13개)
 │   ├── sisyphus.md              # 멀티에이전트 오케스트레이터 + Intent Gate
 │   ├── sisyphus-junior.md       # 집중 실행자 (위임 루프 방지) [NEW]
-│   ├── oracle.md                # GPT xhigh, 아키텍처 컨설턴트 (읽기전용)
+│   ├── oracle.md                # Opus 4.6, 아키텍처 컨설턴트 (읽기전용)
 │   ├── prometheus.md            # 인터뷰 모드 전략 플래너 [NEW]
 │   ├── atlas.md                 # TodoWrite 오케스트레이터 [NEW]
 │   ├── hephaestus.md            # GPT 자율 딥 워커 [NEW]
 │   ├── metis.md                 # 계획 빈틈 분석기 [NEW]
 │   ├── momus.md                 # 계획 품질 리뷰어 [NEW]
-│   ├── researcher.md            # Gemini, 대규모 코드 분석 (읽기전용)
+│   ├── researcher.md            # GPT high, 대규모 코드 분석 (읽기전용)
 │   ├── worker.md                # GLM + 구현 도구
 │   ├── reviewer.md              # ask_parallel 코드 리뷰 (읽기전용)
 │   ├── debugger.md              # GPT high, 난해한 버그 진단 (읽기전용)
@@ -137,7 +135,7 @@ claude-omo/
 ├── commands/                    # ~/.claude/commands/ 에 복사 (13개)
 │   ├── plan.md                  # /plan — Prometheus 인터뷰 기반 계획
 │   ├── route.md                 # /route — smart_route 바로가기
-│   ├── compare.md               # /compare — ask_parallel 3모델 비교
+│   ├── compare.md               # /compare — ask_parallel 2모델 비교 (GPT+GLM)
 │   ├── ralph-loop.md            # /ralph-loop — 100% 완료까지 자동 루프
 │   ├── ulw-loop.md              # /ulw-loop — 최대 강도 ULW 루프
 │   ├── handoff.md               # /handoff — 세션 연속성 컨텍스트 저장
@@ -171,7 +169,7 @@ claude-omo/
 |--------|------|
 | `/plan <기능>` | Prometheus 인터뷰 → 계획 수립 → 실행 |
 | `/route <작업>` | smart_route로 최적 모델 자동 선택 |
-| `/compare <질문>` | GPT/Gemini/GLM 3모델 동시 응답 비교 |
+| `/compare <질문>` | GPT/GLM 2모델 동시 응답 비교 |
 | `/ralph-loop` | 100% 완료까지 자동 루프 실행 |
 | `/ulw-loop` | 최대 강도 ULW 모드 루프 |
 | `/handoff` | 세션 컨텍스트 저장 (다음 세션 연속성) |
@@ -181,7 +179,7 @@ claude-omo/
 | `/stop-continuation` | 자동 진행 메커니즘 중지 |
 | `/cancel-ralph` | Ralph Loop 취소 |
 | `/finish` | 작업 마무리 체크리스트 (검증 → 문서 → 커밋) |
-| `/usage [일수]` | 외부 모델(GPT/Gemini/GLM) 토큰 사용량 통계 |
+| `/usage [일수]` | 외부 모델(GPT/GLM) 토큰 사용량 통계 |
 | `/update-omo [msg]` | claude-omo 변경사항 배포 + GitHub push |
 
 ### 전문 에이전트 (Task 도구)
@@ -190,15 +188,15 @@ claude-omo/
 |----------|------|------|
 | `sisyphus` | 멀티에이전트 오케스트레이터 + Intent Gate | Sonnet |
 | `sisyphus-junior` | 집중 실행자 (위임 루프 방지) | Sonnet |
-| `oracle` | 아키텍처 컨설턴트 (읽기전용) | GPT xhigh |
+| `oracle` | 아키텍처 컨설턴트 (읽기전용) | Opus 4.6 |
 | `prometheus` | 인터뷰 모드 전략 플래너 | Sonnet |
 | `atlas` | TodoWrite 오케스트레이터 | Sonnet |
 | `hephaestus` | 자율 딥 워커 (목표만 주면 스스로 실행) | GPT high |
 | `metis` | 계획 빈틈 분석기 (AI 실패 지점 식별) | Sonnet |
 | `momus` | 계획 품질 리뷰어 (5기준 0-10점 평가) | Sonnet |
-| `researcher` | 대규모 코드 분석 (읽기전용) | Gemini |
+| `researcher` | 대규모 코드 분석 (읽기전용) | GPT high |
 | `worker` | CRUD/보일러플레이트 구현 | GLM |
-| `reviewer` | 코드 리뷰 (3모델 병렬) | ask_parallel |
+| `reviewer` | 코드 리뷰 (2모델 병렬) | ask_parallel |
 | `debugger` | 난해한 버그 진단 (읽기전용) | GPT high |
 | `explore` | 빠른 파일 검색 (읽기전용) | Haiku |
 
@@ -223,8 +221,8 @@ task(category="visual-engineering", load_skills=["frontend-ui-ux", "playwright"]
 |----------|--------|------|
 | ultrabrain | 아키텍처 설계, 전체 전략 | GPT xhigh |
 | deep | 알고리즘, 복잡한 디버깅 | GPT high |
-| visual | UI/UX, React/Vue | Gemini |
-| research | 코드베이스 전체 분석 | Gemini |
+| visual | UI/UX, React/Vue | GPT high |
+| research | 코드베이스 전체 분석 | GPT high |
 | bulk | CRUD, 보일러플레이트 | GLM |
 | writing | 문서, README | GLM |
 | quick | 단순 변환, 포맷팅 | GLM |
@@ -236,9 +234,8 @@ task(category="visual-engineering", load_skills=["frontend-ui-ux", "playwright"]
 | 도구 | 설명 |
 |------|------|
 | `smart_route` | 카테고리 자동 분류 + 최적 모델 라우팅 + 폴백 |
-| `ask_parallel` | 3모델 동시 호출 (Promise.allSettled) |
+| `ask_parallel` | GPT+GLM 2모델 동시 호출 (Promise.allSettled) |
 | `ask_gpt` | GPT Responses API (reasoning_effort 지원) |
-| `ask_gemini` | Gemini OpenAI 호환 (max_tokens, temperature) |
 | `ask_glm` | GLM Z.ai (max_tokens, temperature) |
 | `get_usage_stats` | 모델별 토큰 사용량 통계 |
 
@@ -270,7 +267,6 @@ result = subprocess.run(['claude', 'mcp', 'get', 'multi-model-agent'], capture_o
 print('MCP 등록:', '✅' if 'multi-model-agent' in result.stdout else '❌ 미등록')
 s = json.load(open('$HOME/.claude/settings.json'))
 env = s.get('mcpServers',{}).get('multi-model-agent',{}).get('env',{})
-print('GEMINI_API_KEY:', '✅' if env.get('GEMINI_API_KEY') else '❌ 없음')
 print('GLM_API_KEY:   ', '✅' if env.get('GLM_API_KEY') else '❌ 없음')
 "
 
@@ -299,9 +295,9 @@ print('refresh_token:', '✅' if t.get('refresh_token') else '❌ (만료 시 �
 | Atlas (실행 오케스트레이터) | `atlas` | TodoWrite 기반 |
 | Metis (계획 분석) | `metis` | AI 실패 지점 식별 |
 | Momus (품질 리뷰어) | `momus` | 5기준 0-10점 평가 |
-| Librarian (문서 검색) | `researcher` | Gemini |
+| Librarian (문서 검색) | `researcher` | GPT high |
 | Explore (빠른 검색) | `explore` | Haiku |
-| Momus (코드 리뷰) | `reviewer` | ask_parallel 3모델 |
+| Momus (코드 리뷰) | `reviewer` | ask_parallel (GPT+GLM) |
 | Debugger | `debugger` | GPT high |
 | Intent Gate + Categories | `smart_route` MCP | — |
 | ask_parallel | `ask_parallel` MCP | — |

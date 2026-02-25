@@ -1,17 +1,14 @@
 #!/usr/bin/env node
 /**
- * Multi-Model MCP Server v4.0
+ * Multi-Model MCP Server v5.3
  *
  * 연결 모델:
  *   - GPT-5.3-Codex : ChatGPT OAuth (~/.codex/auth.json) → Responses API /v1/responses
  *   - GLM-5         : Z.ai API Key → OpenAI 호환 엔드포인트
  *
- * v4.0 신규:
- *   - fetchWithRetry: 429/500/502/503/529 → 최대 3회 재시도, 지수 백오프
- *   - smart_route   : 카테고리 기반 자동 라우팅 + 폴백 체인
- *   - ask_parallel  : Promise.allSettled() 다중 모델 동시 호출
- *   - 확장 파라미터 : max_tokens, temperature (GLM), max_tokens (GPT)
- *   - 강화 로깅     : category, retry_count, routing 필드 추가
+ * v5.3 신규:
+ *   - pre-call-indicator: MCP 호출 즉시 ⏳ 표시
+ *   - post-call-logger  : 완료 요약 + activity.log JSONL 기록
  */
 
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
@@ -513,7 +510,7 @@ async function callAskParallel(prompt, models = null, systemPrompt = null, reaso
 // MCP 서버 정의
 // ───────────────────────────────────────────────
 const server = new Server(
-  { name: "multi-model-agent", version: "4.0.0" },
+  { name: "multi-model-agent", version: "5.3.0" },
   { capabilities: { tools: {} } }
 );
 

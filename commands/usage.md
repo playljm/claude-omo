@@ -1,6 +1,6 @@
 ---
 name: usage
-description: 외부 모델(GPT/Gemini/GLM) 토큰 사용량 통계 조회
+description: 외부 모델(GPT/GLM) 토큰 사용량 통계 조회
 user-invocable: true
 metadata:
   version: "1.0.0"

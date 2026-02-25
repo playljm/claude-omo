@@ -1,5 +1,5 @@
 ---
-description: smart_route를 통해 최적 AI 모델로 작업을 라우팅합니다. 카테고리 자동 분류 후 GPT/Gemini/GLM 중 최적 모델 선택.
+description: smart_route를 통해 최적 AI 모델로 작업을 라우팅합니다. 카테고리 자동 분류 후 GPT/GLM 중 최적 모델 선택.
 ---
 
 다음 작업을 `mcp__multi-model-agent__smart_route` 도구로 전달하세요:
