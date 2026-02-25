@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Multi-Model MCP Server v5.1
+ * Multi-Model MCP Server v4.0
  *
  * 연결 모델:
  *   - GPT-5.3-Codex  : ChatGPT OAuth (~/.codex/auth.json) → Responses API /v1/responses
@@ -13,14 +13,6 @@
  *   - ask_parallel  : Promise.allSettled() 다중 모델 동시 호출
  *   - 확장 파라미터 : max_tokens, temperature (Gemini/GLM), max_tokens (GPT)
  *   - 강화 로깅     : category, retry_count, routing 필드 추가
- *
- * v5.1 신규:
- *   - OAuth 개선   : api.responses.write 스코프 체크 제거 → auth_mode 기반 라우팅
- *   - SSE 파서     : ReadableStream 청크 방식 (버퍼링 취약점 해결)
- *   - quick 카테고리: GLM 우선 (GPT → GLM)
- *   - 분류 기본값  : quick (deep → quick)
- *   - Progress알림 : MCP ProgressNotification으로 실시간 진행 표시
- *   - CODEX_CLIENT_ID: @openai/codex 공식 OAuth client_id 하드코딩
  */
 
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
@@ -29,33 +21,14 @@ import {
   CallToolRequestSchema,
   ListToolsRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
-import { readFileSync, writeFileSync, existsSync, appendFileSync, mkdirSync } from "fs";
+import { readFileSync, writeFileSync, existsSync, appendFileSync } from "fs";
 import { homedir } from "os";
-import { join, dirname } from "path";
+import { join } from "path";
 
 // ───────────────────────────────────────────────
 // 토큰 사용량 로깅
 // ───────────────────────────────────────────────
 const USAGE_LOG_PATH = join(homedir(), "mcp-servers", "multi-model", "usage-log.jsonl");
-const LAST_ROUTE_PATH = join(homedir(), "mcp-servers", "multi-model", "last-route.json");
-
-// 카테고리별 한국어 이유 설명
-const CATEGORY_REASON = {
-  ultrabrain: "전체 아키텍처 설계 · 종합 전략 결정",
-  deep:       "알고리즘 분석 · 복잡한 디버깅 · 리팩토링",
-  visual:     "UI/UX · React/Vue · 프론트엔드 작업",
-  research:   "코드베이스 전체 분석 · 대용량 파일",
-  bulk:       "보일러플레이트 · CRUD · 반복 패턴 생성",
-  writing:    "문서 작성 · README · 주석 추가",
-  quick:      "단순 변환 · 포맷팅 · 즉각 처리",
-};
-
-// 모델 표시명
-const MODEL_DISPLAY = {
-  gpt:    "GPT-5.3-Codex",
-  gemini: "Gemini 2.5 Pro",
-  glm:    "GLM-5",
-};
 
 function logUsage(model, inputTokens, outputTokens, extra = {}) {
   const entry = {
@@ -67,39 +40,10 @@ function logUsage(model, inputTokens, outputTokens, extra = {}) {
     ...extra, // category, retry_count, routing, reasoning_effort 등
   };
   try {
-    mkdirSync(dirname(USAGE_LOG_PATH), { recursive: true });
     appendFileSync(USAGE_LOG_PATH, JSON.stringify(entry) + "\n");
   } catch {
     // 로깅 실패해도 메인 기능에 영향 없음
   }
-}
-
-// 라우팅 트레이스를 last-route.json에 저장 (routing-display.js 훅이 읽음)
-function saveRoutingTrace(trace) {
-  try {
-    mkdirSync(dirname(LAST_ROUTE_PATH), { recursive: true });
-    writeFileSync(LAST_ROUTE_PATH, JSON.stringify({ ...trace, timestamp: new Date().toISOString() }));
-  } catch {
-    // 저장 실패해도 무시
-  }
-}
-
-// 응답에 포함될 라우팅 헤더 (유니코드 박스 아트, ANSI 없음)
-function formatRoutingHeader({ cat, model, effort = null, didFallback = false, fallbackFrom = null }) {
-  const modelName = MODEL_DISPLAY[model] ?? model;
-  const effortStr = effort && effort !== "none" ? ` · reasoning: ${effort}` : "";
-  const reason = CATEGORY_REASON[cat] ?? cat;
-  const lines = [
-    `╭─ 🔀 ROUTING ──────────────────────────────────`,
-    `│  카테고리 : ${cat}`,
-    `│  모    델 : ${modelName}${effortStr}`,
-    `│  이    유 : ${reason}`,
-  ];
-  if (didFallback && fallbackFrom) {
-    lines.push(`│  ⚠ 폴백  : ${MODEL_DISPLAY[fallbackFrom] ?? fallbackFrom} 실패 → ${modelName}`);
-  }
-  lines.push(`╰──────────────────────────────────────────────`);
-  return lines.join("\n");
 }
 
 function getUsageStats(days = 7) {
@@ -184,10 +128,27 @@ function getUsageStats(days = 7) {
 // ───────────────────────────────────────────────
 const RETRYABLE_STATUS = new Set([429, 500, 502, 503, 529]);
 
-async function fetchWithRetry(url, options, maxRetries = 3) {
+// 모델별 타임아웃 (ms) — 무한 hang 방지
+const DEFAULT_TIMEOUT = 120_000;
+
+async function fetchWithRetry(url, options, maxRetries = 3, timeoutMs = DEFAULT_TIMEOUT) {
   let retryCount = 0;
   while (true) {
-    const res = await fetch(url, options);
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    let res;
+    try {
+      res = await fetch(url, { ...options, signal: controller.signal });
+      clearTimeout(timer);
+    } catch (err) {
+      clearTimeout(timer);
+      if (err.name === "AbortError") throw new Error(`API 타임아웃 (${timeoutMs / 1000}초 초과)`);
+      if (retryCount >= maxRetries) throw err;
+      const delay = Math.pow(2, retryCount) * 1000 + Math.random() * 500;
+      await new Promise((r) => setTimeout(r, delay));
+      retryCount++;
+      continue;
+    }
     if (res.ok) return { res, retryCount };
     if (!RETRYABLE_STATUS.has(res.status) || retryCount >= maxRetries) {
       return { res, retryCount };
@@ -205,7 +166,6 @@ async function fetchWithRetry(url, options, maxRetries = 3) {
 // ───────────────────────────────────────────────
 const CODEX_AUTH_PATH = join(homedir(), ".codex", "auth.json");
 const TOKEN_REFRESH_URL = "https://auth.openai.com/oauth/token";
-const CODEX_CLIENT_ID = "app_EMoamEEZ73f0CkXaXp7hrann"; // @openai/codex 공식 OAuth client_id
 
 let refreshPromise = null;
 
@@ -233,29 +193,14 @@ function getJwtInfo(token) {
   }
 }
 
-// ChatGPT JWT에서 https://api.openai.com/auth 클레임 추출 (account_id 등)
-function getJwtAuthClaim(token) {
-  try {
-    const payload = token.split(".")[1];
-    const padded = payload + "=".repeat((4 - (payload.length % 4)) % 4);
-    const decoded = JSON.parse(Buffer.from(padded, "base64").toString("utf8"));
-    return decoded["https://api.openai.com/auth"] ?? null;
-  } catch {
-    return null;
-  }
-}
-
 const SCOPE_RE_LOGIN_MSG =
-  "`codex login`으로 ChatGPT 계정 인증 후 사용하세요.\n" +
-  "브라우저 없는 서버: scp ~/.codex/auth.json root@<서버IP>:~/.codex/auth.json";
+  "Windows에서 `codex login` 실행 후 auth.json을 이 서버로 복사하세요:\n" +
+  "  scp ~/.codex/auth.json root@<서버IP>:~/.codex/auth.json\n" +
+  "※ OpenAI refresh grant가 api.responses.write 스코프를 유지하지 않는 제한입니다.";
 
 async function doRefreshToken(refreshToken, clientId) {
-  const body = {
-    grant_type: "refresh_token",
-    refresh_token: refreshToken,
-    client_id: clientId ?? CODEX_CLIENT_ID,
-    scope: "openid profile email", // Codex CLI와 동일한 스코프
-  };
+  const body = { grant_type: "refresh_token", refresh_token: refreshToken };
+  if (clientId) body.client_id = clientId;
   const res = await fetch(TOKEN_REFRESH_URL, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -271,13 +216,13 @@ async function doRefreshToken(refreshToken, clientId) {
 async function getValidAccessToken() {
   // ── 1순위: OPENAI_API_KEY 환경변수 ──────────────────────────
   if (process.env.OPENAI_API_KEY) {
-    return { token: process.env.OPENAI_API_KEY, isOAuthOnly: false };
+    return process.env.OPENAI_API_KEY;
   }
 
   // ── 2순위: auth.json의 OPENAI_API_KEY ───────────────────────
   const auth = readAuthJson();
   if (auth?.OPENAI_API_KEY) {
-    return { token: auth.OPENAI_API_KEY, isOAuthOnly: false };
+    return auth.OPENAI_API_KEY;
   }
 
   // ── 3순위: ChatGPT OAuth access_token ───────────────────────
@@ -286,7 +231,7 @@ async function getValidAccessToken() {
       "GPT 인증 없음. 다음 중 하나를 설정하세요:\n" +
       "  방법 1) OPENAI_API_KEY 환경변수 설정 (platform.openai.com에서 발급)\n" +
       "  방법 2) ~/.codex/auth.json의 OPENAI_API_KEY 필드에 sk-... 키 입력\n" +
-      "  방법 3) codex login 으로 ChatGPT OAuth 인증"
+      "  방법 3) codex login 으로 ChatGPT OAuth 인증 (api.responses.write 스코프 필요)"
     );
   }
 
@@ -298,23 +243,33 @@ async function getValidAccessToken() {
     throw new Error("access_token이 없습니다. `codex login`으로 재인증이 필요합니다.");
   }
 
-  // ★ 핵심 변경: api.responses.write 스코프 체크 제거
-  // auth_mode === 'chatgpt' 이면 chatgpt.com/backend-api/codex/responses 사용
-  // (Codex CLI의 공식 엔드포인트 — 비공식 아님)
-  const authMode = auth.auth_mode ?? "chatgpt";
-  const isOAuthOnly = (authMode === "chatgpt");
+  const { exp: expiry, scopes, clientId } = getJwtInfo(accessToken);
 
-  const { exp: expiry, clientId } = getJwtInfo(accessToken);
+  // ChatGPT OAuth 토큰은 api.responses.write 스코프 필요
+  // (refresh로는 이 스코프를 얻을 수 없음 — OpenAI 플랫폼 제한)
+  if (!scopes.includes("api.responses.write")) {
+    throw new Error(
+      `auth.json ChatGPT 토큰에 api.responses.write 스코프가 없습니다.\n` +
+      `OPENAI_API_KEY(sk-...) 설정을 권장합니다:\n` +
+      `  install.sh 재실행 시 OPENAI_API_KEY 입력\n` +
+      `  또는: claude mcp add --scope user multi-model-agent -e OPENAI_API_KEY=sk-... ...\n` +
+      `${SCOPE_RE_LOGIN_MSG}`
+    );
+  }
+
   const isExpired = expiry > 0 && Date.now() / 1000 > expiry - 60;
-  if (!isExpired) return { token: accessToken, isOAuthOnly };
+  if (!isExpired) return accessToken;
+
   if (!refreshToken) {
     throw new Error(
       "토큰이 만료되었고 refresh_token이 없습니다. `codex login`으로 재인증하세요."
     );
   }
+
   if (!refreshPromise) {
     refreshPromise = doRefreshToken(refreshToken, clientId)
       .then((refreshed) => {
+        const { scopes: newScopes } = getJwtInfo(refreshed.access_token);
         const newAuth = {
           ...auth,
           tokens: {
@@ -325,8 +280,12 @@ async function getValidAccessToken() {
           last_refresh: new Date().toISOString(),
         };
         writeFileSync(CODEX_AUTH_PATH, JSON.stringify(newAuth, null, 2));
-        // isOAuthOnly는 auth_mode 기반이므로 refresh 후에도 동일
-        return { token: refreshed.access_token, isOAuthOnly };
+        if (!newScopes.includes("api.responses.write")) {
+          throw new Error(
+            `토큰 갱신 후 api.responses.write 스코프 소실.\n${SCOPE_RE_LOGIN_MSG}`
+          );
+        }
+        return refreshed.access_token;
       })
       .finally(() => { refreshPromise = null; });
   }
@@ -334,7 +293,7 @@ async function getValidAccessToken() {
   try {
     return await refreshPromise;
   } catch (e) {
-    throw new Error(`액세스 토큰 갱신 실패: ${e.message}\n\`codex login\`으로 재인증하세요.`);
+    throw new Error(`액세스 토큰 갱신 실패: ${e.message}`);
   }
 }
 
@@ -349,111 +308,16 @@ async function callGpt(
   maxTokens = null,
   logExtra = {}
 ) {
-  const { token, isOAuthOnly } = await getValidAccessToken();
-
-  // OAuth 전용 토큰: chatgpt.com/backend-api/codex/responses 사용
-  // (api.responses.write 스코프 없는 ChatGPT Plus/Pro OAuth 토큰용)
-  if (isOAuthOnly) {
-    const authClaim = getJwtAuthClaim(token);
-    const accountId = authClaim?.chatgpt_account_id;
-    if (!accountId) {
-      throw new Error(
-        "ChatGPT account_id를 JWT에서 추출할 수 없습니다. `codex login`으로 재인증하세요."
-      );
-    }
-
-    const instructions = systemPrompt || "You are a helpful coding assistant.";
-    const codexBody = {
-      model, instructions, store: false, stream: true,
-      input: [{ role: "user", content: prompt }],
-    };
-    if (reasoningEffort !== "none") codexBody.reasoning = { effort: reasoningEffort };
-    if (maxTokens) codexBody.max_output_tokens = maxTokens;
-
-    const { res: codexRes, retryCount: codexRetry } = await fetchWithRetry(
-      "https://chatgpt.com/backend-api/codex/responses",
-      {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${token}`,
-          "Content-Type": "application/json",
-          "chatgpt-account-id": accountId,
-          "OpenAI-Beta": "responses=experimental",
-          originator: "codex_cli_rs",
-        },
-        body: JSON.stringify(codexBody),
-      }
-    );
-
-    if (!codexRes.ok) {
-      const errText = await codexRes.text();
-      throw new Error(
-        `GPT Codex backend 오류 (HTTP ${codexRes.status}): ${errText.substring(0, 300)}\n` +
-        `※ 이 오류가 계속되면 OPENAI_API_KEY를 platform.openai.com에서 발급하세요.`
-      );
-    }
-
-    // ReadableStream 기반 SSE 파서 (버퍼링 취약점 해결)
-    const reader = codexRes.body.getReader();
-    const decoder = new TextDecoder();
-    let buffer = "", currentEvent = null;
-    const deltas = [];
-    let completedResponse = null;
-    try {
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split("\n");
-        buffer = lines.pop() ?? "";
-        for (const line of lines) {
-          if (line.startsWith("event: ")) {
-            currentEvent = line.slice(7).trim();
-          } else if (line.startsWith("data: ") && currentEvent) {
-            try {
-              const parsed = JSON.parse(line.slice(6));
-              if (currentEvent === "response.completed") completedResponse = parsed;
-              else if (currentEvent === "response.output_text.delta" && parsed.delta) {
-                deltas.push(parsed.delta);
-              }
-            } catch { /* skip malformed */ }
-            currentEvent = null;
-          } else if (line === "") {
-            currentEvent = null;
-          }
-        }
-      }
-    } finally {
-      reader.releaseLock();
-    }
-
-    if (completedResponse) {
-      const usage = completedResponse.response?.usage ?? {};
-      logUsage(model, usage.input_tokens ?? 0, usage.output_tokens ?? 0, {
-        retry_count: codexRetry, routing: "chatgpt_codex_backend", ...logExtra,
-      });
-      const texts = [];
-      for (const item of completedResponse.response?.output ?? []) {
-        if (item.type === "message") {
-          for (const block of item.content ?? []) {
-            if (block.type === "output_text" && block.text) texts.push(block.text);
-          }
-        }
-      }
-      if (texts.length > 0) return texts.join("\n");
-    }
-
-    if (deltas.length > 0) return deltas.join("");
-    return "[GPT Codex backend: 응답 파싱 실패 — codex login 재인증 필요]";
-  }
+  const token = await getValidAccessToken();
 
   const input = [];
-  // Responses API (정상 경로)
   if (systemPrompt) input.push({ role: "system", content: systemPrompt });
   input.push({ role: "user", content: prompt });
+
   const body = { model, input };
   if (reasoningEffort !== "none") body.reasoning = { effort: reasoningEffort };
   if (maxTokens) body.max_output_tokens = maxTokens;
+
   const { res, retryCount } = await fetchWithRetry("https://api.openai.com/v1/responses", {
     method: "POST",
     headers: {
@@ -462,10 +326,12 @@ async function callGpt(
     },
     body: JSON.stringify(body),
   });
+
   if (!res.ok) {
     const err = await res.text();
     throw new Error(`GPT API 오류 (HTTP ${res.status}): ${err}`);
   }
+
   const data = await res.json();
   const usage = data.usage ?? {};
   logUsage(model, usage.input_tokens ?? 0, usage.output_tokens ?? 0, {
@@ -474,6 +340,7 @@ async function callGpt(
     retry_count: retryCount,
     ...logExtra,
   });
+
   const texts = [];
   for (const item of data.output ?? []) {
     if (item.type === "message") {
@@ -482,11 +349,13 @@ async function callGpt(
       }
     }
   }
+
   if (texts.length === 0) {
     return `[응답 파싱 실패] raw: ${JSON.stringify(data.output ?? data).slice(0, 500)}`;
   }
   return texts.join("\n");
 }
+
 // ───────────────────────────────────────────────
 // callGemini — OpenAI 호환 Chat Completions
 // ───────────────────────────────────────────────
@@ -540,8 +409,7 @@ async function callGemini(
 }
 
 // ───────────────────────────────────────────────
-// callGlm — OpenAI 호환 Chat Completions (Z.ai Coding Plan)
-// /api/coding/paas/v4 → 구독 쿼터 사용 (별도 크레딧 불필요)
+// callGlm — OpenAI 호환 Chat Completions (Z.ai)
 // ───────────────────────────────────────────────
 async function callGlm(
   prompt,
@@ -566,7 +434,7 @@ async function callGlm(
   if (temperature !== null) body.temperature = temperature;
 
   const { res, retryCount } = await fetchWithRetry(
-    "https://api.z.ai/api/coding/paas/v4/chat/completions",
+    "https://api.z.ai/api/paas/v4/chat/completions",
     {
       method: "POST",
       headers: {
@@ -614,18 +482,18 @@ const CATEGORY_ROUTING = {
   research:   { model: "gemini", effort: null,     fallback: ["gpt"],    fallbackEffort: "high"   },
   bulk:       { model: "glm",    effort: null,     fallback: ["gemini"], fallbackEffort: null      },
   writing:    { model: "glm",    effort: null,     fallback: ["gemini"], fallbackEffort: null      },
-  quick:      { model: "glm",    effort: null,    fallback: ["gpt"],    fallbackEffort: "none"    },
+  quick:      { model: "gpt",    effort: "none",   fallback: ["glm"],    fallbackEffort: null      },
 };
 
 function classifyCategory(task) {
   for (const [cat, pattern] of Object.entries(CATEGORY_PATTERNS)) {
     if (pattern.test(task)) return cat;
   }
-  return "quick"; // 미분류 기본값: GLM(quick) — 빠르고 저렴
+  return null; // 분류 불가 → 호출자가 기본값 결정
 }
 
 async function callSmartRoute(task, category = null, context = null, maxTokens = null) {
-  const cat = category ?? classifyCategory(task); // classifyCategory는 항상 값 반환
+  const cat = category ?? classifyCategory(task) ?? "deep";
   const routing = CATEGORY_ROUTING[cat] ?? CATEGORY_ROUTING.deep;
   const fullPrompt = context ? `[컨텍스트]\n${context}\n\n[작업]\n${task}` : task;
   const primaryModel = routing.model;
@@ -649,15 +517,7 @@ async function callSmartRoute(task, category = null, context = null, maxTokens =
       category: cat,
       routing: `smart_route→${primaryModel}`,
     });
-    saveRoutingTrace({
-      tool: "smart_route",
-      category: cat,
-      model: primaryModel,
-      effort: routing.effort,
-      reason: CATEGORY_REASON[cat] ?? cat,
-      didFallback: false,
-    });
-    return result;
+    return `[smart_route: ${cat} → ${primaryModel}]\n\n${result}`;
   } catch (primaryErr) {
     // Fallback 체인
     for (const fbModel of routing.fallback) {
@@ -666,16 +526,7 @@ async function callSmartRoute(task, category = null, context = null, maxTokens =
           category: cat,
           routing: `smart_route→${primaryModel}(fail)→${fbModel}`,
         });
-        saveRoutingTrace({
-          tool: "smart_route",
-          category: cat,
-          model: fbModel,
-          effort: routing.fallbackEffort,
-          reason: CATEGORY_REASON[cat] ?? cat,
-          didFallback: true,
-          fallbackFrom: primaryModel,
-        });
-        return result;
+        return `[smart_route: ${cat} → ${fbModel} (${primaryModel} 실패 후 폴백)]\n\n${result}`;
       } catch {
         // 다음 폴백으로 계속
       }
@@ -716,7 +567,7 @@ async function callAskParallel(prompt, models = null, systemPrompt = null) {
 // MCP 서버 정의
 // ───────────────────────────────────────────────
 const server = new Server(
-  { name: "multi-model-agent", version: "5.1.0" },
+  { name: "multi-model-agent", version: "4.0.0" },
   { capabilities: { tools: {} } }
 );
 
@@ -735,13 +586,13 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
         "- research   : Gemini     — 코드베이스 전체 분석, 대규모 파일",
         "- bulk       : GLM        — 보일러플레이트, CRUD, 반복 패턴",
         "- writing    : GLM        — 문서, README, 주석 추가",
-        "- quick      : GLM        — 단순 변환, 포맷팅",
+        "- quick      : GPT(none)  — 단순 변환, 포맷팅",
         "",
         "【폴백 체인】 primary 실패 시 자동 폴백",
         "- ultrabrain/deep → GPT → Gemini",
         "- visual/research → Gemini → GPT",
         "- bulk/writing    → GLM → Gemini",
-        "- quick           → GLM → GPT",
+        "- quick           → GPT → GLM",
       ].join("\n"),
       inputSchema: {
         type: "object",
@@ -878,7 +729,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
       inputSchema: {
         type: "object",
         properties: {
-          prompt: { type: "string", description: "GLM-4.7-Flash에게 전달할 작업 내용" },
+          prompt: { type: "string", description: "GLM-5에게 전달할 작업 내용" },
           model: {
             type: "string",
             description: "사용할 GLM 모델",
@@ -913,70 +764,45 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
   ],
 }));
 
-server.setRequestHandler(CallToolRequestSchema, async (request, extra) => {
-  const { name, arguments: args } = request.params;
-  const progressToken = request.params._meta?.progressToken;
-  let result;
+// ── last-call.json 경로 (PostToolUse 훅이 읽음) ─────────────────────────────
+const LAST_CALL_PATH = join(homedir(), "mcp-servers", "multi-model", "last-call.json");
 
-  async function sendProgress(progress, total, message) {
-    if (!progressToken || !extra?.sendNotification) return;
-    try {
-      await extra.sendNotification({
-        method: "notifications/progress",
-        params: { progressToken, progress, total, message },
-      });
-    } catch { /* 알림 실패는 무시 */ }
-  }
+server.setRequestHandler(CallToolRequestSchema, async (request) => {
+  const { name, arguments: args } = request.params;
+  const callStart = Date.now();
+  let result;
+  let callMeta = { tool: name, status: "ok" };
 
   try {
     switch (name) {
-      case "smart_route": {
-        const cat = args.category ?? classifyCategory(args.task);
-        const routing = CATEGORY_ROUTING[cat] ?? CATEGORY_ROUTING.quick;
-        const modelName = MODEL_DISPLAY[routing.model] ?? routing.model;
-        await sendProgress(0, 2, `[smart_route] ${cat} → ${modelName} 호출 중...`);
+      case "smart_route":
         result = await callSmartRoute(
           args.task,
           args.category ?? null,
           args.context ?? null,
           args.max_tokens ?? null
         );
-        await sendProgress(2, 2, `[smart_route] 완료`);
         break;
-      }
 
       case "ask_parallel":
-        await sendProgress(0, 2, `[ask_parallel] GPT / Gemini / GLM 동시 호출 중...`);
         result = await callAskParallel(
           args.prompt,
           args.models ?? null,
           args.system_prompt ?? null
         );
-        saveRoutingTrace({
-          tool: "ask_parallel",
-          model: "parallel",
-          models: args.models ?? ["gpt", "gemini", "glm"],
-        });
-        await sendProgress(2, 2, `[ask_parallel] 완료`);
         break;
 
-      case "ask_gpt": {
-        const effort = args.reasoning_effort ?? "medium";
-        await sendProgress(0, 2, `[ask_gpt] GPT-5.3-Codex (reasoning: ${effort}) 호출 중...`);
+      case "ask_gpt":
         result = await callGpt(
           args.prompt,
           args.model ?? "gpt-5.3-codex",
           args.system_prompt ?? null,
-          effort,
+          args.reasoning_effort ?? "medium",
           args.max_tokens ?? null
         );
-        saveRoutingTrace({ tool: "ask_gpt", model: "gpt", effort });
-        await sendProgress(2, 2, `[ask_gpt] 완료`);
         break;
-      }
 
       case "ask_gemini":
-        await sendProgress(0, 2, `[ask_gemini] Gemini 2.5 Pro 호출 중...`);
         result = await callGemini(
           args.prompt,
           args.model ?? "gemini-2.5-pro",
@@ -984,12 +810,9 @@ server.setRequestHandler(CallToolRequestSchema, async (request, extra) => {
           args.max_tokens ?? null,
           args.temperature ?? null
         );
-        saveRoutingTrace({ tool: "ask_gemini", model: "gemini" });
-        await sendProgress(2, 2, `[ask_gemini] 완료`);
         break;
 
       case "ask_glm":
-        await sendProgress(0, 2, `[ask_glm] GLM-5 호출 중...`);
         result = await callGlm(
           args.prompt,
           args.model ?? "glm-5",
@@ -997,8 +820,6 @@ server.setRequestHandler(CallToolRequestSchema, async (request, extra) => {
           args.max_tokens ?? null,
           args.temperature ?? null
         );
-        saveRoutingTrace({ tool: "ask_glm", model: "glm" });
-        await sendProgress(2, 2, `[ask_glm] 완료`);
         break;
 
       case "get_usage_stats":
@@ -1009,8 +830,36 @@ server.setRequestHandler(CallToolRequestSchema, async (request, extra) => {
         result = `알 수 없는 툴: ${name}`;
     }
   } catch (err) {
+    callMeta.status = "error";
+    callMeta.error  = err.message;
     result = `[오류] ${err.message}`;
   }
+
+  // ── 메타데이터 기록 (PostToolUse 훅용) ────────────────────────────────────
+  callMeta.elapsed_ms = Date.now() - callStart;
+  callMeta.timestamp  = new Date().toISOString();
+
+  if (name === "smart_route" && typeof result === "string") {
+    const m = result.match(/^\[smart_route: (\w+) \u2192 (\w+)/);
+    if (m) {
+      callMeta.category = m[1];
+      const mdl = m[2];
+      callMeta.model   = mdl === "gpt" ? "gpt-5.3-codex" : mdl === "gemini" ? "gemini-2.5-pro" : "glm-5";
+      callMeta.routing = "smart_route\u2192" + mdl;
+    }
+  } else if (name === "ask_gpt") {
+    callMeta.model            = args?.model ?? "gpt-5.3-codex";
+    callMeta.reasoning_effort = args?.reasoning_effort ?? "medium";
+  } else if (name === "ask_gemini") {
+    callMeta.model = args?.model ?? "gemini-2.5-pro";
+  } else if (name === "ask_glm") {
+    callMeta.model = args?.model ?? "glm-5";
+  } else if (name === "ask_parallel") {
+    callMeta.model  = "parallel";
+    callMeta.models = args?.models ?? ["gpt", "gemini", "glm"];
+  }
+
+  try { writeFileSync(LAST_CALL_PATH, JSON.stringify(callMeta, null, 2)); } catch {}
 
   return { content: [{ type: "text", text: result }] };
 });

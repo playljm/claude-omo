@@ -245,40 +245,36 @@ def upsert_hook(hooks, event, cmd):
 # node 전체 경로 사용 (nvm 환경에서 훅 실행 시 PATH 미계승 대비)
 ulw_cmd  = f"{node_bin} {mcp_path}/ulw-detector.js 2>/dev/null || true"
 sess_cmd = f"{node_bin} {mcp_path}/session-summary.js 2>/dev/null || true"
-comment_cmd = f"{node_bin} {mcp_path}/hooks/comment-checker.js 2>/dev/null || true"
+comment_cmd    = f"{node_bin} {mcp_path}/hooks/comment-checker.js 2>/dev/null || true"
 write_guard_cmd = f"{node_bin} {mcp_path}/hooks/write-guard.js 2>/dev/null || true"
-routing_pre_cmd = f"{node_bin} {mcp_path}/hooks/routing-pre-display.js 2>/dev/null || true"
+pre_indicator_cmd = f"{node_bin} {mcp_path}/hooks/pre-call-indicator.js 2>/dev/null || true"
+post_logger_cmd   = f"{node_bin} {mcp_path}/hooks/post-call-logger.js 2>/dev/null || true"
+
 upsert_hook(hooks, "UserPromptSubmit", ulw_cmd)
 upsert_hook(hooks, "SessionEnd", sess_cmd)
-# Quality hooks
-post_tool = hooks.setdefault("PostToolUse", [])
-if not post_tool or not isinstance(post_tool[0], dict):
-    post_tool.clear()
-    post_tool.append({"matcher": "Write|Edit", "hooks": []})
-hook_list_post = post_tool[0].setdefault("hooks", [])
-existing_post = [h.get("command", "") for h in hook_list_post]
-if not any("comment-checker" in c for c in existing_post):
-    hook_list_post.append({"type": "command", "command": comment_cmd})
 
-pre_tool = hooks.setdefault("PreToolUse", [])
-if not pre_tool or not isinstance(pre_tool[0], dict):
-    pre_tool.clear()
-    pre_tool.append({"matcher": "Write", "hooks": []})
-hook_list_pre = pre_tool[0].setdefault("hooks", [])
-existing_pre = [h.get("command", "") for h in hook_list_pre]
-if not any("write-guard" in c for c in existing_pre):
-    hook_list_pre.append({"type": "command", "command": write_guard_cmd})
+def upsert_matcher_hook(hooks, event, matcher, cmd):
+    """매처별 훅 항목 등록 (중복 방지)"""
+    entries = hooks.setdefault(event, [])
+    script_name = os.path.basename(cmd.split()[1] if len(cmd.split()) > 1 else cmd)
+    entry = next((e for e in entries if e.get("matcher","") == matcher), None)
+    if entry is None:
+        entry = {"matcher": matcher, "hooks": []}
+        entries.append(entry)
+    hook_list = entry.setdefault("hooks", [])
+    if not any(script_name in h.get("command","") for h in hook_list):
+        hook_list.append({"type": "command", "command": cmd})
 
-# routing-pre-display: PreToolUse, mcp__multi-model-agent__ matcher
-pre_tool2 = hooks.setdefault("PreToolUse", [])
-# 두 번째 엔트리 (matcher: mcp__multi-model-agent__)
-mcp_matcher = "mcp__multi-model-agent__"
-existing_pre2_entries = [e.get("matcher", "") for e in pre_tool2]
-if mcp_matcher not in existing_pre2_entries:
-    pre_tool2.append({"matcher": mcp_matcher, "hooks": [{"type": "command", "command": routing_pre_cmd}]})
+# Quality + Activity hooks
+upsert_matcher_hook(hooks, "PostToolUse", "Write|Edit", comment_cmd)
+upsert_matcher_hook(hooks, "PreToolUse",  "Write",      write_guard_cmd)
+# v5.3: MCP 호출 진행 표시기 + 활동 로거
+upsert_matcher_hook(hooks, "PreToolUse",  "mcp__multi-model-agent", pre_indicator_cmd)
+upsert_matcher_hook(hooks, "PostToolUse", "mcp__multi-model-agent", post_logger_cmd)
+
 with open(settings_path, 'w', encoding='utf-8') as f:
     json.dump(s, f, indent=2, ensure_ascii=False)
-print(f"  가이더 훅: PostToolUse → comment-checker, PreToolUse → write-guard + routing-pre-display")
+print(f"  훅 등록: UserPromptSubmit, SessionEnd, PreToolUse(2), PostToolUse(2) — v5.3")
 PYEOF
 info "settings.json 훅 등록 완료"
 

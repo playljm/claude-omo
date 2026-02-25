@@ -1,6 +1,6 @@
 # claude-omo
 
-**OMO(oh-my-opencode) 스타일 멀티모델 오케스트레이션 — Claude Code 네이티브 구현 v5.2**
+**OMO(oh-my-opencode) 스타일 멀티모델 오케스트레이션 — Claude Code 네이티브 구현 v5.3**
 
 GPT / Gemini / GLM 세 모델을 카테고리 기반으로 자동 라우팅하고,
 OMO의 핵심 에이전트 패턴을 Claude Code 프리미티브로 이식한 설정 모음.
@@ -10,6 +10,8 @@ OMO의 핵심 에이전트 패턴을 Claude Code 프리미티브로 이식한 �
 **v5.1**: OAuth 개선(스코프 체크 제거), SSE ReadableStream 파서, quick 커테고리 GLM 전환, MCP 진행 알림(⏳ CALLING).
 
 **v5.2**: 워크플로 커맨드 2개 추가 — `/finish` (마무리 체크리스트), `/usage` (토큰 사용량 통계).
+
+**v5.3**: MCP 호출 즉시 진행 표시 (⏳ pre-call-indicator), 에이전트 활동 로그 (activity.log), AbortController 타임아웃.
 
 ---
 
@@ -100,11 +102,12 @@ claude-omo/
 │   ├── index.js                 # smart_route, ask_parallel, fetchWithRetry
 │   ├── ulw-detector.js          # ULW 모드 훅 (UserPromptSubmit)
 │   ├── session-summary.js       # 세션 요약
-│   └── hooks/                   # Quality Hooks (v5.1 업데이트)
+│   └── hooks/                   # Quality + Activity 훅
+│       ├── pre-call-indicator.js  # MCP 호출 시작 즉시 ⏳ 표시 (PreToolUse) [v5.3]
+│       ├── post-call-logger.js    # 완료 요약 + activity.log (PostToolUse) [v5.3]
 │       ├── comment-checker.js   # AI 슬랭 코멘트 감지 (PostToolUse)
 │       ├── write-guard.js       # 기존 파일 덮어쓰기 방지 (PreToolUse)
-│       ├── routing-display.js   # 라우팅 가시화 (PostToolUse)
-│       └── routing-pre-display.js # 호출 시작 알림 (PreToolUse) [v5.1]
+│       └── routing-display.js   # 라우팅 가시화 (PostToolUse — legacy)
 ├── agents/                      # ~/.claude/agents/ 에 복사 (13개)
 │   ├── sisyphus.md              # 멀티에이전트 오케스트레이터 + Intent Gate
 │   ├── sisyphus-junior.md       # 집중 실행자 (위임 루프 방지) [NEW]
@@ -228,14 +231,15 @@ task(category="visual-engineering", load_skills=["frontend-ui-ux", "playwright"]
 
 ---
 
-## Quality Hooks (v5.1 업데이트)
+## Quality & Activity Hooks (v5.3)
 
 | 훅 | 타입 | 설명 |
 |----|------|------|
 | `comment-checker` | PostToolUse | AI 슬랭("이 함수는", "중요:", "주의:") 코멘트 감지 및 경고 |
 | `write-guard` | PreToolUse | 기존 파일 덮어쓰기 전 Read 여부 확인, 미확인 시 차단 |
 | `routing-display` | PostToolUse | 외부 모델 호출 후 라우팅 정보 표시 (카테고리·모델·이유·폴백 여부) |
-| `routing-pre-display` | PreToolUse | MCP 도구 호출 시작 전 `⏳ CALLING ...` 알림 표시 |
+| `pre-call-indicator` | PreToolUse | MCP 호출 시작 즉시 `⏳ 🧠 GPT [deep] — 14:23:05 호출 시작` 표시 [v5.3] |
+| `post-call-logger` | PostToolUse | 완료 후 `✅ GPT [deep] — 34.5s` + `activity.log` JSONL 기록 [v5.3] |
 
 ---
 
@@ -291,4 +295,4 @@ print('refresh_token:', '✅' if t.get('refresh_token') else '❌ (만료 시 �
 | Ralph Loop | `/ralph-loop`, `/ulw-loop` | 자동 루프 커맨드 |
 | Handoff | `/handoff` | 세션 연속성 |
 | Skill System | `skills/` 디렉토리 | git-master, frontend-ui-ux, playwright |
-| Quality Hooks | `hooks/` 디렉토리 | comment-checker, write-guard, routing-display, **routing-pre-display** [v5.1] |
+| Activity Hooks | `hooks/` 디렉토리 | pre-call-indicator, post-call-logger [v5.3], comment-checker, write-guard |
