@@ -485,7 +485,7 @@ async function callSmartRoute(task, category = null, context = null, maxTokens =
 // ───────────────────────────────────────────────
 // ask_parallel — Promise.allSettled() 다중 모델 동시 호출
 // ───────────────────────────────────────────────
-async function callAskParallel(prompt, models = null, systemPrompt = null) {
+async function callAskParallel(prompt, models = null, systemPrompt = null, reasoningEffort = "medium") {
   const ALL_MODELS = ["gpt", "glm"];
   const selectedModels = (models ?? ALL_MODELS).filter((m) => ALL_MODELS.includes(m));
   if (selectedModels.length === 0) selectedModels.push(...ALL_MODELS);
@@ -493,7 +493,7 @@ async function callAskParallel(prompt, models = null, systemPrompt = null) {
   const logExtra = { routing: "ask_parallel" };
 
   const modelCalls = {
-    gpt: () => callGpt(prompt, "gpt-5.3-codex", systemPrompt, "medium", null, logExtra),
+    gpt: () => callGpt(prompt, "gpt-5.3-codex", systemPrompt, reasoningEffort, null, logExtra),
     glm: () => callGlm(prompt, "glm-5", systemPrompt, null, null, logExtra),
   };
 
@@ -574,6 +574,12 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
             description: "사용할 모델 목록 (선택, 기본: 전체 [gpt, glm])",
           },
           system_prompt: { type: "string", description: "시스템 프롬프트 (선택)" },
+          reasoning_effort: {
+            type: "string",
+            description: "GPT 추론 강도 (기본값: medium)",
+            enum: ["none", "low", "medium", "high", "xhigh"],
+            default: "medium",
+          },
         },
         required: ["prompt"],
       },
@@ -701,7 +707,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         result = await callAskParallel(
           args.prompt,
           args.models ?? null,
-          args.system_prompt ?? null
+          args.system_prompt ?? null,
+          args.reasoning_effort ?? "medium"
         );
         break;
 
@@ -756,8 +763,9 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
   } else if (name === "ask_glm") {
     callMeta.model = args?.model ?? "glm-5";
   } else if (name === "ask_parallel") {
-    callMeta.model  = "parallel";
-    callMeta.models = args?.models ?? ["gpt", "glm"];
+    callMeta.model            = "parallel";
+    callMeta.models           = args?.models ?? ["gpt", "glm"];
+    callMeta.reasoning_effort = args?.reasoning_effort ?? "medium";
   }
 
   try { writeFileSync(LAST_CALL_PATH, JSON.stringify(callMeta, null, 2)); } catch {}

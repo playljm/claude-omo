@@ -33,11 +33,10 @@ const toolInput = input?.tool_input ?? input?.input ?? input?.tool_use?.input ??
 
 // ── 모델/도구 메타데이터 ───────────────────────────────────────────
 const TOOL_META = {
-  ask_gpt:      { icon: "🧠", short: "GPT-5.3-Codex"  },
-  ask_gemini:   { icon: "♊", short: "Gemini 2.5 Pro" },
-  ask_glm:      { icon: "⚡", short: "GLM-5"           },
-  smart_route:  { icon: "🔀", short: "smart_route"     },
-  ask_parallel: { icon: "🔀", short: "All Models"      },
+  ask_gpt:      { icon: "🧠", short: "GPT-5.3-Codex" },
+  ask_glm:      { icon: "⚡", short: "GLM-5"          },
+  smart_route:  { icon: "🔀", short: "smart_route"    },
+  ask_parallel: { icon: "🔀", short: "All Models"     },
 };
 
 const meta = TOOL_META[tool] ?? { icon: "🤖", short: tool };

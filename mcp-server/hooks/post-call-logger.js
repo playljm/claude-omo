@@ -72,9 +72,8 @@ const statusIcon = meta.status === "error" ? "❌" : "✅";
 
 // 모델 표시명
 const MODEL_SHORT = {
-  "gpt-5.3-codex":  "GPT",
-  "gemini-2.5-pro": "Gemini",
-  "glm-5":          "GLM",
+  "gpt-5.3-codex": "GPT",
+  "glm-5":         "GLM",
 };
 let modelDisplay = meta.model ? (MODEL_SHORT[meta.model] ?? meta.model) : tool;
 if (meta.models && Array.isArray(meta.models)) {
@@ -83,6 +82,7 @@ if (meta.models && Array.isArray(meta.models)) {
 
 const parts = [`${statusIcon} ${modelDisplay}`];
 if (meta.category) parts.push(`[${meta.category}]`);
-if (meta.routing && meta.routing.includes("fail")) parts.push("(fallback)");
+if (meta.reasoning_effort && meta.reasoning_effort !== "none") parts.push(`(${meta.reasoning_effort})`);
+if (meta.routing && meta.routing.includes("fail")) parts.push("→fallback");
 
 console.log(`${parts.join(" ")} — ${elapsed}s`);

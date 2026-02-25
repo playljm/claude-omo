@@ -1,5 +1,27 @@
 # Changelog
 
+## [5.3.0] - 2026-02-25
+
+### Fixed - 훅 등록 버그 수정 및 모델 가시성 개선
+
+#### 버그 수정 (Critical)
+- **`pre-call-indicator.js` 미등록**: `settings.json`에 PreToolUse 훅이 등록되지 않아 모델 호출 전 표시가 전혀 없던 문제 수정
+- **`routing-display.js` dead code**: `last-route.json`(존재하지 않음)을 읽어 항상 조기 종료하던 문제 → `last-call.json` 기반으로 전체 재작성
+
+#### 개선 - 모델 가시성
+- **`post-call-logger.js`**: reasoning_effort 표시 추가 → `✅ GPT [deep] (high) — 34.5s`
+- **`routing-display.js`**: Windows 호환 stdin 처리(for await), 업데이트된 모델명(GLM-5), Gemini 잔재 제거
+- **`ask_parallel`**: `reasoning_effort` 파라미터 추가 (기존 hardcoded medium → 설정 가능)
+
+#### settings.json 훅 구조
+```
+PreToolUse  [mcp__multi-model-agent] → pre-call-indicator.js  (신규 등록)
+PostToolUse [mcp__multi-model-agent] → post-call-logger.js    (신규 등록)
+                                     → routing-display.js     (수정됨)
+```
+
+---
+
 ## [5.2.1] - 2026-02-25
 
 ### Added - 업데이트 자동화
