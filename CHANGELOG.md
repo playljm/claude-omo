@@ -1,5 +1,15 @@
 # Changelog
 
+## [5.2.0] - 2026-02-25
+
+### Added - 워크플로 커맨드 2개 추가
+
+#### 커맨드 (11 -> 13)
+- **/finish** (v2.1): 작업 마무리 체크리스트 — 검증 → 변경사항 요약 → 문서 업데이트 → git 커밋/푸시 단계별 안내
+- **/usage** (v1.0): 외부 모델(GPT/Gemini/GLM) 토큰 사용량 통계 조회 — `~/mcp-servers/multi-model/usage-log.jsonl` 파싱, 최근 N일 기간 지정 가능
+
+---
+
 ## [5.1.0] - 2026-02-24
 
 ### Changed - OAuth, SSE, Routing, Progress

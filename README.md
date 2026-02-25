@@ -1,6 +1,6 @@
 # claude-omo
 
-**OMO(oh-my-opencode) 스타일 멀티모델 오케스트레이션 — Claude Code 네이티브 구현 v5.1**
+**OMO(oh-my-opencode) 스타일 멀티모델 오케스트레이션 — Claude Code 네이티브 구현 v5.2**
 
 GPT / Gemini / GLM 세 모델을 카테고리 기반으로 자동 라우팅하고,
 OMO의 핵심 에이전트 패턴을 Claude Code 프리미티브로 이식한 설정 모음.
@@ -8,6 +8,8 @@ OMO의 핵심 에이전트 패턴을 Claude Code 프리미티브로 이식한 �
 **v5.0**: 에이전트 7→13개, 커맨드 3→11개, 스킬 시스템 신규 추가, OMO 패리티 ~90% 달성.
 
 **v5.1**: OAuth 개선(스코프 체크 제거), SSE ReadableStream 파서, quick 커테고리 GLM 전환, MCP 진행 알림(⏳ CALLING).
+
+**v5.2**: 워크플로 커맨드 2개 추가 — `/finish` (마무리 체크리스트), `/usage` (토큰 사용량 통계).
 
 ---
 
@@ -21,7 +23,7 @@ bash install.sh
 
 설치 스크립트가 다음을 자동 처리합니다:
 - MCP 서버 설치 (`~/mcp-servers/multi-model/`)
-- 에이전트 13개 + 커맨드 11개 복사 (`~/.claude/`)
+- 에이전트 13개 + 커맨드 13개 복사 (`~/.claude/`)
 - 스킬 3개 복사 (`~/.claude/skills/`)
 - CLAUDE.md 설치 (`~/.claude/CLAUDE.md`)
 - settings.json 훅 + MCP 등록
@@ -117,18 +119,20 @@ claude-omo/
 │   ├── reviewer.md              # ask_parallel 코드 리뷰 (읽기전용)
 │   ├── debugger.md              # GPT high, 난해한 버그 진단 (읽기전용)
 │   └── explore.md               # Haiku, 빠른 파일 검색 (읽기전용)
-├── commands/                    # ~/.claude/commands/ 에 복사 (11개)
+├── commands/                    # ~/.claude/commands/ 에 복사 (13개)
 │   ├── plan.md                  # /plan — Prometheus 인터뷰 기반 계획
 │   ├── route.md                 # /route — smart_route 바로가기
 │   ├── compare.md               # /compare — ask_parallel 3모델 비교
-│   ├── ralph-loop.md            # /ralph-loop — 100% 완료까지 자동 루프 [NEW]
-│   ├── ulw-loop.md              # /ulw-loop — 최대 강도 ULW 루프 [NEW]
-│   ├── handoff.md               # /handoff — 세션 연속성 컨텍스트 저장 [NEW]
-│   ├── init-deep.md             # /init-deep — 계층적 AGENTS.md 생성 [NEW]
-│   ├── start-work.md            # /start-work — Prometheus 계획 실행 [NEW]
-│   ├── refactor.md              # /refactor — LSP+AST-grep 지능형 리팩토링 [NEW]
-│   ├── stop-continuation.md     # /stop-continuation — 자동 진행 중지 [NEW]
-│   └── cancel-ralph.md          # /cancel-ralph — Ralph Loop 취소 [NEW]
+│   ├── ralph-loop.md            # /ralph-loop — 100% 완료까지 자동 루프
+│   ├── ulw-loop.md              # /ulw-loop — 최대 강도 ULW 루프
+│   ├── handoff.md               # /handoff — 세션 연속성 컨텍스트 저장
+│   ├── init-deep.md             # /init-deep — 계층적 AGENTS.md 생성
+│   ├── start-work.md            # /start-work — Prometheus 계획 실행
+│   ├── refactor.md              # /refactor — LSP+AST-grep 지능형 리팩토링
+│   ├── stop-continuation.md     # /stop-continuation — 자동 진행 중지
+│   ├── cancel-ralph.md          # /cancel-ralph — Ralph Loop 취소
+│   ├── finish.md                # /finish — 작업 마무리 체크리스트 [NEW]
+│   └── usage.md                 # /usage — 외부 모델 토큰 사용량 조회 [NEW]
 └── skills/                      # ~/.claude/skills/ 에 복사 (NEW v5.0)
     ├── git-master/SKILL.md      # 원자적 커밋, 리베이스, 히스토리 고고학
     ├── frontend-ui-ux/SKILL.md  # 디자이너 출신 개발자 페르소나
@@ -161,6 +165,8 @@ claude-omo/
 | `/refactor` | LSP+AST-grep 기반 지능형 리팩토링 |
 | `/stop-continuation` | 자동 진행 메커니즘 중지 |
 | `/cancel-ralph` | Ralph Loop 취소 |
+| `/finish` | 작업 마무리 체크리스트 (검증 → 문서 → 커밋) |
+| `/usage [일수]` | 외부 모델(GPT/Gemini/GLM) 토큰 사용량 통계 |
 
 ### 전문 에이전트 (Task 도구)
 
