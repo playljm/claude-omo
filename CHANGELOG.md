@@ -1,5 +1,14 @@
 # Changelog
 
+## [5.2.1] - 2026-02-25
+
+### Added - 업데이트 자동화
+
+- **update.bat**: Windows 더블클릭으로 sync + GitHub push (agents/commands/skills/CLAUDE.md → C:\dev\.claude\ + ~/.claude/ 동기화)
+- **/update-omo** 커맨드: Claude Code 내에서 직접 배포 + push 실행
+
+---
+
 ## [5.2.0] - 2026-02-25
 
 ### Added - 워크플로 커맨드 2개 추가

@@ -11,6 +11,8 @@ OMO의 핵심 에이전트 패턴을 Claude Code 프리미티브로 이식한 �
 
 **v5.2**: 워크플로 커맨드 2개 추가 — `/finish` (마무리 체크리스트), `/usage` (토큰 사용량 통계).
 
+**v5.2.1**: 업데이트 자동화 — `/update-omo` 커맨드 + `update.bat` (배포+push 원클릭).
+
 **v5.3**: MCP 호출 즉시 진행 표시 (⏳ pre-call-indicator), 에이전트 활동 로그 (activity.log), AbortController 타임아웃.
 
 ---
@@ -35,6 +37,16 @@ bash install.sh
 이미 설치한 경우 업데이트:
 ```bash
 cd ~/claude-omo && git pull && bash install.sh
+```
+
+**Windows에서 편집 후 배포+push:**
+```
+# 방법 1: 더블클릭
+C:\dev\claude-omo\update.bat
+
+# 방법 2: Claude Code 내에서
+/update-omo
+/update-omo feat: 새 기능 추가   # 커밋 메시지 직접 지정
 ```
 
 ---
@@ -170,6 +182,7 @@ claude-omo/
 | `/cancel-ralph` | Ralph Loop 취소 |
 | `/finish` | 작업 마무리 체크리스트 (검증 → 문서 → 커밋) |
 | `/usage [일수]` | 외부 모델(GPT/Gemini/GLM) 토큰 사용량 통계 |
+| `/update-omo [msg]` | claude-omo 변경사항 배포 + GitHub push |
 
 ### 전문 에이전트 (Task 도구)
 

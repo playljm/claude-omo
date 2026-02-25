@@ -409,7 +409,8 @@ async function callGemini(
 }
 
 // ───────────────────────────────────────────────
-// callGlm — OpenAI 호환 Chat Completions (Z.ai)
+// callGlm — OpenAI 호환 Chat Completions (Z.ai / bigmodel.cn 유료 플랜)
+// /api/paas/v4 → 표준 유료 API 엔드포인트 (크레딧 차감 방식)
 // ───────────────────────────────────────────────
 async function callGlm(
   prompt,
