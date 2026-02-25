@@ -24,19 +24,20 @@ const description = toolInput?.description ?? "";
 
 // ── 에이전트별 배너 정의 ─────────────────────────────────────────
 const E = "\x1b";
+// BMP 유니코드만 사용 (U+0000~FFFF) — 터미널 폰트 호환
 const AGENTS = {
-  "oracle":       { icon: "🔮", label: "ORACLE",       sub: "아키텍처 자문",   color: `${E}[1;95m` },
-  "researcher":   { icon: "🔬", label: "RESEARCHER",   sub: "코드베이스 분석", color: `${E}[1;94m` },
-  "worker":       { icon: "⚙", label: "WORKER",       sub: "구현 작업",       color: `${E}[1;93m` },
-  "reviewer":     { icon: "👁", label: "REVIEWER",     sub: "코드 검토",       color: `${E}[1;92m` },
-  "explore":      { icon: "🔍", label: "EXPLORE",      sub: "빠른 탐색",       color: `${E}[1;96m` },
-  "Explore":      { icon: "🔍", label: "EXPLORE",      sub: "빠른 탐색",       color: `${E}[1;96m` },
-  "hephaestus":   { icon: "🔨", label: "HEPHAESTUS",   sub: "자율 구현",       color: `${E}[1;91m` },
-  "sisyphus":     { icon: "♾", label: "SISYPHUS",     sub: "오케스트레이터",  color: `${E}[1;96m` },
-  "debugger":     { icon: "🐛", label: "DEBUGGER",     sub: "디버그 분석",     color: `${E}[1;91m` },
-  "prometheus":   { icon: "📋", label: "PROMETHEUS",   sub: "전략 플래닝",     color: `${E}[1;33m` },
-  "atlas":        { icon: "🗺", label: "ATLAS",        sub: "투두 오케스트레이터", color: `${E}[1;33m` },
-  "general-purpose": { icon: "🤖", label: "AGENT",    sub: "범용 에이전트",   color: `${E}[1;97m` },
+  "oracle":       { icon: "✦", label: "ORACLE",       sub: "아키텍처 자문",      color: `${E}[1;95m` },
+  "researcher":   { icon: "⊕", label: "RESEARCHER",   sub: "코드베이스 분석",    color: `${E}[1;94m` },
+  "worker":       { icon: "⚙", label: "WORKER",       sub: "구현 작업",          color: `${E}[1;93m` },
+  "reviewer":     { icon: "◉", label: "REVIEWER",     sub: "코드 검토",          color: `${E}[1;92m` },
+  "explore":      { icon: "⊛", label: "EXPLORE",      sub: "빠른 탐색",          color: `${E}[1;96m` },
+  "Explore":      { icon: "⊛", label: "EXPLORE",      sub: "빠른 탐색",          color: `${E}[1;96m` },
+  "hephaestus":   { icon: "⚒", label: "HEPHAESTUS",  sub: "자율 구현",          color: `${E}[1;91m` },
+  "sisyphus":     { icon: "♾", label: "SISYPHUS",     sub: "오케스트레이터",     color: `${E}[1;96m` },
+  "debugger":     { icon: "⚡", label: "DEBUGGER",     sub: "디버그 분석",        color: `${E}[1;91m` },
+  "prometheus":   { icon: "☰", label: "PROMETHEUS",   sub: "전략 플래닝",        color: `${E}[1;33m` },
+  "atlas":        { icon: "◎", label: "ATLAS",        sub: "투두 오케스트레이터", color: `${E}[1;33m` },
+  "general-purpose": { icon: "◈", label: "AGENT",     sub: "범용 에이전트",      color: `${E}[1;97m` },
 };
 
 const agent = AGENTS[agentType];
