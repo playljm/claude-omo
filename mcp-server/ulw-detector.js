@@ -25,8 +25,7 @@ try {
 }
 
 if (/\bulw\b|\bultrawork\b/i.test(prompt)) {
-  console.log(`
-╔══════════════════════════════════════╗
+  const instructions = `╔══════════════════════════════════════╗
 ║  ULW MODE (Ultrawork) — 시지프스     ║
 ╚══════════════════════════════════════╝
 
@@ -42,6 +41,16 @@ if (/\bulw\b|\bultrawork\b/i.test(prompt)) {
    - 코드 리뷰/교차 검증            → Task(subagent_type="reviewer")
    - 빠른 파일 검색/패턴 탐색       → Task(subagent_type="explore")
 5. 막히면 우회로 찾기, 다른 경로로 계속 진행
-6. 완료 선언은 모든 TodoWrite 항목 체크 후에만 가능
-`.trim());
+6. 완료 선언은 모든 투두 항목 체크 후에만 가능`;
+
+  // stdout → Claude 컨텍스트 주입
+  console.log(instructions);
+
+  // stderr → 사용자 터미널에 색상 박스 표시
+  const E = "\x1b";
+  const banner =
+    `\n${E}[1;96m╔══════════════════════════════════════╗${E}[0m\n` +
+    `${E}[1;96m║${E}[0m  ${E}[1;93m⚡ ULW MODE${E}[0m ${E}[1;97m(Ultrawork)${E}[0m ${E}[2m— 시지프스${E}[0m     ${E}[1;96m║${E}[0m\n` +
+    `${E}[1;96m╚══════════════════════════════════════╝${E}[0m\n`;
+  process.stderr.write(banner);
 }
