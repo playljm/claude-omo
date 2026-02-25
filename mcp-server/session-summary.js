@@ -30,9 +30,12 @@ entries.forEach((l) => {
   } catch { /* skip */ }
 });
 
+const MODEL_SHORT = { "gpt-5.3-codex": "GPT", "glm-5": "GLM" };
+
 console.log("\n=== 오늘의 외부 모델 사용 ===");
 for (const [model, s] of Object.entries(byModel)) {
+  const display = MODEL_SHORT[model] ?? model;
   const cats = s.categories.size > 0 ? ` [${[...s.categories].join(", ")}]` : "";
-  console.log(`  ${model}: ${s.calls}회, ${s.tokens.toLocaleString()}토큰${cats}`);
+  console.log(`  ${display}: ${s.calls}회, ${s.tokens.toLocaleString()}토큰${cats}`);
 }
 console.log("================================");

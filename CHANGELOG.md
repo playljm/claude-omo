@@ -1,5 +1,30 @@
 # Changelog
 
+## [5.3.2] - 2026-02-25
+
+### Fixed - 성능 개선 및 시각적 출력 품질 향상
+
+#### 중복 출력 제거 (Critical)
+- **`post-call-logger.js` + `routing-display.js` 중복 출력 제거**: 동일 PostToolUse에 두 훅이 등록되어 같은 정보가 두 번 출력되던 문제 수정
+  - `post-call-logger.js`: 터미널 출력 제거, activity.log 기록 전용으로 역할 분리
+  - `routing-display.js`: 경과시간(`elapsed_ms`) 추가하여 원스톱 시각 출력 담당
+
+#### 시각적 개선
+- **`pre-call-indicator.js`**: `console.log` → `process.stderr.write` 변경 — PreToolUse stdout이 Claude 컨텍스트에 주입되는 부작용 방지
+- **`routing-display.js`**: 박스 너비 고정(`BOX_WIDTH = 58`) — 이모지 폭 계산 오류로 상/하단 줄 길이 불일치 수정
+- **`session-summary.js`**: 모델명 축약 (`gpt-5.3-codex` → `GPT`, `glm-5` → `GLM`)
+- **`routing-pre-display.js`** 삭제 — 미등록 legacy 파일, Gemini 잔재 포함
+
+#### 성능 개선
+- **`index.js`**: reasoning_effort별 동적 타임아웃 (`none` 30s / `low` 45s / `medium` 60s / `high` 90s / `xhigh` 120s) — 단순 호출이 불필요하게 120s까지 대기하던 문제 해소
+- **`index.js`**: `last-call.json` 쓰기를 `writeFileSync` → `writeFile`(비동기)로 변경 — 이벤트 루프 차단 제거
+- **`post-call-logger.js` + `routing-display.js`**: 신뢰 윈도우 10초 → 30초 — xhigh reasoning 후 훅 딜레이로 `unknown` 표시되던 문제 해소
+
+#### 코드 품질
+- **`comment-checker.js`**: `process.stdin.on("data")` → `for await` 패턴으로 통일 (다른 훅과 일관성)
+
+---
+
 ## [5.3.1] - 2026-02-25
 
 ### Fixed - Gemini 제거 정합성 수정 및 문서 클린업

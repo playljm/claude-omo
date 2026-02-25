@@ -61,4 +61,5 @@ if (cat) parts.push(`[${cat}]`);
 if (effort && effort !== "none") parts.push(`reasoning:${effort}`);
 
 const time = new Date().toLocaleTimeString("ko-KR", { hour12: false });
-console.log(`⏳ ${parts.join(" ")} — ${time} 호출 시작`);
+// stderr 사용: stdout은 PreToolUse 훅에서 Claude 컨텍스트에 주입됨
+process.stderr.write(`⏳ ${parts.join(" ")} — ${time} 호출 시작\n`);

@@ -37,8 +37,8 @@ if (tool === "get_usage_stats") process.exit(0);
 let meta = {};
 if (existsSync(LAST_CALL_PATH)) {
   try { meta = JSON.parse(readFileSync(LAST_CALL_PATH, "utf8")); } catch {}
-  // 10초 이내 기록만 신뢰
-  if (meta.timestamp && Date.now() - new Date(meta.timestamp).getTime() > 10000) meta = {};
+  // 30초 이내 기록만 신뢰 (xhigh reasoning은 훅 딜레이가 클 수 있음)
+  if (meta.timestamp && Date.now() - new Date(meta.timestamp).getTime() > 30000) meta = {};
 }
 
 // ── wall-clock elapsed 계산 ────────────────────────────────────────
@@ -66,23 +66,5 @@ const entry = {
 };
 try { appendFileSync(ACTIVITY_LOG, JSON.stringify(entry) + "\n"); } catch {}
 
-// ── 터미널 출력 (1~2줄 이내) ──────────────────────────────────────
-const elapsed    = (wallElapsedMs / 1000).toFixed(1);
-const statusIcon = meta.status === "error" ? "❌" : "✅";
-
-// 모델 표시명
-const MODEL_SHORT = {
-  "gpt-5.3-codex": "GPT",
-  "glm-5":         "GLM",
-};
-let modelDisplay = meta.model ? (MODEL_SHORT[meta.model] ?? meta.model) : tool;
-if (meta.models && Array.isArray(meta.models)) {
-  modelDisplay = meta.models.map(m => MODEL_SHORT[m] ?? m).join("+");
-}
-
-const parts = [`${statusIcon} ${modelDisplay}`];
-if (meta.category) parts.push(`[${meta.category}]`);
-if (meta.reasoning_effort && meta.reasoning_effort !== "none") parts.push(`(${meta.reasoning_effort})`);
-if (meta.routing && meta.routing.includes("fail")) parts.push("→fallback");
-
-console.log(`${parts.join(" ")} — ${elapsed}s`);
+// ── 터미널 출력 없음 — routing-display.js가 시각 출력 담당 ──────────
+// activity.log 기록만 수행 (위에서 완료)

@@ -18,6 +18,7 @@ import {
   ListToolsRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
 import { readFileSync, writeFileSync, existsSync, appendFileSync } from "fs";
+import { writeFile } from "fs/promises";
 import { homedir } from "os";
 import { join } from "path";
 
@@ -124,8 +125,15 @@ function getUsageStats(days = 7) {
 // ───────────────────────────────────────────────
 const RETRYABLE_STATUS = new Set([429, 500, 502, 503, 529]);
 
-// 모델별 타임아웃 (ms) — 무한 hang 방지
+// reasoning_effort별 타임아웃 (ms) — none/low는 빠른 응답, xhigh는 긴 추론 허용
 const DEFAULT_TIMEOUT = 120_000;
+const EFFORT_TIMEOUT = {
+  none:   30_000,
+  low:    45_000,
+  medium: 60_000,
+  high:   90_000,
+  xhigh:  120_000,
+};
 
 async function fetchWithRetry(url, options, maxRetries = 3, timeoutMs = DEFAULT_TIMEOUT) {
   let retryCount = 0;
@@ -314,6 +322,7 @@ async function callGpt(
   if (reasoningEffort !== "none") body.reasoning = { effort: reasoningEffort };
   if (maxTokens) body.max_output_tokens = maxTokens;
 
+  const timeoutMs = EFFORT_TIMEOUT[reasoningEffort] ?? DEFAULT_TIMEOUT;
   const { res, retryCount } = await fetchWithRetry("https://api.openai.com/v1/responses", {
     method: "POST",
     headers: {
@@ -321,7 +330,7 @@ async function callGpt(
       "Content-Type": "application/json",
     },
     body: JSON.stringify(body),
-  });
+  }, 3, timeoutMs);
 
   if (!res.ok) {
     const err = await res.text();
@@ -765,7 +774,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     callMeta.reasoning_effort = args?.reasoning_effort ?? "medium";
   }
 
-  try { writeFileSync(LAST_CALL_PATH, JSON.stringify(callMeta, null, 2)); } catch {}
+  // 비동기 쓰기: 이벤트 루프 block 없이 훅용 메타데이터 기록
+  writeFile(LAST_CALL_PATH, JSON.stringify(callMeta)).catch(() => {});
 
   return { content: [{ type: "text", text: result }] };
 });
