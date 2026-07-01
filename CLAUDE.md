@@ -113,3 +113,22 @@ ask_parallel(
 - `researcher` — GPT(high) 대규모 코드 분석 (읽기 전용)
 - `worker`     — GLM + 구현 도구 (모든 도구)
 - `reviewer`   — ask_parallel 코드 리뷰 (읽기 전용)
+
+---
+
+## Ultracode 서브에이전트 모델 정책 (토큰 절약)
+
+메인 모델이 Fable/Opus일 때(특히 ultracode·워크플로 오케스트레이션) 메인 루프는
+오케스트레이션·계획·최종 판단만 담당하고, 실제 작업 에이전트는 저비용 모델을 기본으로 쓴다.
+
+**규칙: Workflow `agent()`와 Agent(Task) 호출 시 model을 항상 명시적으로 지정한다.**
+(생략 = 메인 모델 상속 = 고비용. 상속은 아래 "최상위 허용" 케이스에만.)
+
+| 모델 | 용도 |
+|------|------|
+| `haiku` | 기계적 작업 — 파일 스캔/수집, grep성 탐색, 포맷 변환, 단순 요약, 목록 취합, 체크리스트 검증 |
+| `sonnet` | **기본값** — 구현, 리팩토링, 1차 코드 리뷰, 조사/분석, 문서 작성, 테스트 작성 |
+| 최상위 상속(fable/opus) | 꼭 필요한 경우에만 — ①아키텍처 최종 결정·설계 트레이드오프 ②adversarial verify 최종 판정(judge) ③복수 결과 최종 synthesis ④sonnet 2회 이상 실패한 고난도 디버깅 |
+
+**effort 병행**: haiku·기계적 스테이지는 `effort: 'low'`, 일반 sonnet 작업은 기본값,
+최종 판정·synthesis 스테이지만 high 이상.
