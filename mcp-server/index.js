@@ -7,7 +7,7 @@
  *   - kind: "openai-responses" | "openai-chat" | "cli" 3종을 지원.
  *
  * 기본 프로바이더:
- *   - GPT (openai-responses) : 인증 체인 api_key → codex_cli → chatgpt_oauth (ToS 준수 우선순위)
+ *   - GPT (openai-responses) : 기본 인증 체인 api_key → codex_cli (chatgpt_oauth는 레거시 opt-in)
  *   - GLM (openai-chat)      : Z.ai API Key → OpenAI 호환 엔드포인트
  *
  * --selftest 플래그: @modelcontextprotocol/sdk 임포트 없이 providers.json 로드 결과만 점검하고 종료.
@@ -177,7 +177,7 @@ const DEFAULT_PROVIDERS_CONFIG = {
       base_url: "https://api.openai.com/v1",
       auth: {
         api_key_env: "OPENAI_API_KEY",
-        auth_priority: ["api_key", "codex_cli", "chatgpt_oauth"],
+        auth_priority: ["api_key", "codex_cli"],
         allow_chatgpt_oauth: false,
       },
       default_model: "gpt-5.3-codex",
@@ -245,8 +245,7 @@ function isLocalBaseUrl(baseUrl) {
 }
 
 // ───────────────────────────────────────────────
-// GPT 인증 체인 — api_key → codex_cli → chatgpt_oauth (ToS 준수 우선순위)
-// auth.json 구조: { tokens: { access_token, refresh_token }, OPENAI_API_KEY, last_refresh }
+// GPT 인증 체인 — 기본 api_key → codex_cli. chatgpt_oauth는 레거시 opt-in일 때만 사용.
 // ───────────────────────────────────────────────
 const CODEX_AUTH_PATH = join(homedir(), ".codex", "auth.json");
 const TOKEN_REFRESH_URL = "https://auth.openai.com/oauth/token";
@@ -281,7 +280,7 @@ function getJwtInfo(token) {
 
 const SCOPE_RE_LOGIN_MSG =
   "`OPENAI_API_KEY` 설정 또는 서버에서 `codex login` 실행을 권장합니다.\n" +
-  "브라우저 없는 서버에서 auth.json 복사가 불가피하면 전용 사용자 계정으로 복사하고 `chmod 600 ~/.codex/auth.json`을 적용하세요.\n" +
+  "ChatGPT OAuth 직접 호출은 기본 인증 체인에서 제외된 레거시 opt-in 경로입니다.\n" +
   "※ OpenAI refresh grant가 api.responses.write 스코프를 유지하지 않는 제한입니다.";
 
 async function doRefreshToken(refreshToken, clientId) {
@@ -299,13 +298,10 @@ async function doRefreshToken(refreshToken, clientId) {
   return await res.json();
 }
 
-// api_key_env 환경변수 → auth.json 동일 필드 순으로 조회 (없으면 null)
 function getApiKeyForProvider(authCfg) {
   const envName = authCfg?.api_key_env;
   if (!envName) return null;
   if (process.env[envName]) return process.env[envName];
-  const auth = readAuthJson();
-  if (auth?.[envName]) return auth[envName];
   return null;
 }
 
@@ -410,8 +406,8 @@ async function resolveGptAuth(provider) {
     `${provider.label} 인증 실패. 다음 중 하나를 설정하세요:\n` +
     `  방법 1) ${authCfg.api_key_env ?? "API_KEY"} 환경변수 설정 (정식 API 키 — 권장)\n` +
     `  방법 2) codex CLI 설치 후 \`codex login\` (PATH에 codex 필요 — 공식 클라이언트 경유)\n` +
-    `  방법 3) providers.json의 auth.allow_chatgpt_oauth를 true로 설정 후 \`codex login\`\n` +
-    `         (ChatGPT OAuth 토큰 직접 호출은 OpenAI 이용약관 위반 소지가 있어 기본 비활성화)`
+    `  레거시) providers.json auth_priority에 "chatgpt_oauth"를 추가하고 auth.allow_chatgpt_oauth를 true로 설정\n` +
+    `         (ChatGPT OAuth 토큰 직접 호출은 OpenAI 이용약관 위반 소지가 있어 기본 인증 체인에서 제외됨)`
   );
 }
 
@@ -785,7 +781,7 @@ function buildAskParallelDescription(providers) {
 function kindDescriptionNote(kind) {
   switch (kind) {
     case "openai-responses":
-      return "OpenAI 호환 Responses API 직접 호출. 인증 체인: API 키 → codex CLI → ChatGPT OAuth(옵션).";
+      return "OpenAI 호환 Responses API 직접 호출. 기본 인증 체인: API 키 → codex CLI.";
     case "openai-chat":
       return "OpenAI 호환 Chat Completions API 호출 (GLM/DeepSeek/Groq/OpenRouter/Ollama 등 전부 지원).";
     case "cli":

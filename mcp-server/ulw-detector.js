@@ -50,7 +50,7 @@ const E = "\x1b";
 
 if (HARD_RE.test(prompt)) {
   // HARD 모드는 ULW와 동시 매치되어도 우선 적용
-  const instructions = `[HARD MODE 활성화] 이 작업은 하드모드로 수행한다: (1) ultrathink 수준으로 깊게 분석하고 작업을 분해해 TodoWrite로 추적. (2) 독립 서브태스크는 병렬 Task 에이전트로 최대 동원 — 하드모드에서는 서브에이전트 모델 제한이 해제되며 최상위 모델 사용 허용. (3) 핵심 판단은 smart_route(category=ultrabrain)과 oracle 자문을 병행. (4) 구현 결과는 ask_parallel 교차검증 + momus 채점으로 검증하고 8/10 미만이면 재작업. (5) 모든 todo가 완료·검증되기 전에 턴을 끝내지 마라.`;
+  const instructions = `[HARD MODE 활성화] 이 작업은 하드모드로 수행한다: (1) ultrathink 수준으로 깊게 분석하고 작업을 분해해 TodoWrite로 추적. (2) 독립 서브태스크는 병렬 Task 에이전트로 최대 동원 — 하드모드에서는 서브에이전트 모델 제한이 해제되며 최상위 모델 사용 허용. (3) 핵심 판단은 smart_route(category=ultrabrain)과 oracle 자문을 병행. (4) 구현 결과는 ask_parallel 교차검증 + momus 채점으로 검증하고 8/10 미만이면 재작업. (5) 같은 검증 실패, 외부 모델 실패, 또는 사용자 결정이 필요한 blocker가 2회 반복되면 즉시 중단하고 증거·시도한 우회로·필요한 결정을 보고한다. (6) 모든 todo가 완료·검증되기 전에 턴을 끝내지 마라.`;
 
   // stdout → Claude 컨텍스트 주입
   console.log(instructions);
@@ -77,8 +77,9 @@ if (HARD_RE.test(prompt)) {
    - 아키텍처 결정/설계 자문        → Task(subagent_type="oracle")
    - 코드 리뷰/교차 검증            → Task(subagent_type="reviewer")
    - 빠른 파일 검색/패턴 탐색       → Task(subagent_type="explore")
-5. 막히면 우회로 찾기, 다른 경로로 계속 진행
-6. 완료 선언은 모든 투두 항목 체크 후에만 가능
+5. 막히면 우회로를 1회 시도한다
+6. 같은 검증 실패, 외부 모델 실패, 또는 사용자 결정이 필요한 blocker가 2회 반복되면 즉시 중단하고 증거·시도한 우회로·필요한 결정을 보고한다
+7. 완료 선언은 모든 투두 항목 체크 후에만 가능
 
 응답 포맷 규칙 (반드시 준수):
 - 섹션마다 이모지 헤더 사용: 🔍 분석, 🚀 실행, ✅ 완료, ⚠️ 주의, ❌ 오류

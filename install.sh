@@ -92,8 +92,8 @@ fi
 
 # ─── 3. API 키 수집 (MCP env 주입용) ────────────────────────
 step "API 키 수집"
-echo "  MCP 서버가 API 키를 읽으려면 settings.json에 직접 주입해야 합니다."
-echo "  (Linux/Rocky에서 .bashrc 환경변수는 MCP 프로세스에 전달되지 않음)"
+echo "  MCP 서버가 API 키를 읽으려면 claude mcp env에 등록해야 합니다."
+echo "  (Linux/Rocky에서 .bashrc 환경변수는 MCP 프로세스에 전달되지 않을 수 있음)"
 echo ""
 
 # 현재 환경변수에 있으면 기본값으로 사용, 없으면 입력 요청
@@ -169,7 +169,7 @@ if [[ -z "$OPENAI_KEY" ]]; then
 fi
 
 [[ -n "$GLM_KEY"     ]] && info "GLM_API_KEY 수집됨"     || warn "GLM_API_KEY 건너뜀 (나중에 수동 설정 필요)"
-[[ -n "$OPENAI_KEY"  ]] && info "OPENAI_API_KEY 수집됨"  || warn "OPENAI_API_KEY 건너뜀 (GPT는 ~/.codex/auth.json 으로 폴백)"
+[[ -n "$OPENAI_KEY"  ]] && info "OPENAI_API_KEY 수집됨"  || warn "OPENAI_API_KEY 건너뜀 (GPT는 codex CLI 인증으로 폴백)"
 
 # ─── 4. MCP 서버 설치 ──────────────────────────────────────
 step "MCP 서버 설치: $MCP_DIR"
@@ -434,25 +434,17 @@ CODEX_AUTH="$HOME/.codex/auth.json"
 # ─── 10. GPT — codex auth.json 안내 ────────────────────────
 step "GPT (Codex) 인증 설정"
 if [[ -f "$CODEX_AUTH" ]]; then
-  info "~/.codex/auth.json 이미 존재 — GPT 바로 사용 가능"
+  info "~/.codex/auth.json 감지됨 — codex CLI 인증 상태는 selftest에서 확인하세요"
 else
   warn "~/.codex/auth.json 없음"
   echo ""
-  echo "  [방법 1] codex login 실행 (브라우저 OAuth)"
+  echo "  [권장] codex login 실행"
   echo "    npm install -g @openai/codex && codex login"
   echo ""
-  echo "  [방법 2] 다른 머신에서 auth.json 복사 (브라우저 없는 서버용)"
-  if [[ "$OS" == "linux" ]]; then
-    echo "    # 마지막 수단입니다. root 공유 대신 전용 사용자 계정으로만 복사하세요:"
-    echo "    ssh $(whoami)@<이-서버-IP> \"mkdir -p ~/.codex && chmod 700 ~/.codex\""
-    echo "    scp ~/.codex/auth.json $(whoami)@<이-서버-IP>:~/.codex/auth.json"
-    echo "    ssh $(whoami)@<이-서버-IP> \"chmod 600 ~/.codex/auth.json\""
-    echo ""
-    echo "    auth.json에는 refresh token이 포함될 수 있으므로 로그/채팅/문서에 붙여넣지 마세요."
-  fi
+  echo "  브라우저 없는 서버는 OPENAI_API_KEY 등록을 우선 사용하세요."
   echo ""
   mkdir -p "$HOME/.codex"
-  warn "install.sh는 더 이상 auth.json 원문 붙여넣기를 받지 않습니다. OPENAI_API_KEY 또는 codex login을 권장합니다."
+  warn "install.sh는 auth.json 원문 붙여넣기나 복사 안내를 제공하지 않습니다. OPENAI_API_KEY 또는 codex login을 사용하세요."
 fi
 
 # ─── 완료 ──────────────────────────────────────────────────

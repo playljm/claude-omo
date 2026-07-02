@@ -1,15 +1,18 @@
 # claude-omo
 
-**OMO(oh-my-opencode) 스타일 멀티모델 오케스트레이션 — Claude Code 네이티브 구현 v6.0**
+**OMO(oh-my-opencode) 스타일 멀티모델 오케스트레이션 — Claude Code 네이티브 구현 v6.0.2**
 
 GPT / GLM 두 모델을 카테고리 기반으로 자동 라우팅하고,
 OMO의 핵심 에이전트 패턴을 Claude Code 프리미티브로 이식한 설정 모음.
+
+**v6.0.2**: 리뷰 후 추가 보강 — ULW/HARD 실제 주입문 runaway guard, 검증 우선 업데이트 스크립트,
+allowlist staging, CI 범위 확장, ChatGPT OAuth 기본 인증 체인 제외.
 
 **v6.0.1**: 사용자 피드백 반영 — README/TROUBLESHOOT 라우팅·인증 문서 정합성 수정, `write-guard`
 실차단 전환, ULW/HARD 키워드 오탐 방지, 기본 자체 테스트 추가.
 
 **v6.0**: mcp-server를 `providers.json` 기반 플러그인 아키텍처로 전면 리팩토링 — 프로바이더 추가/제거가
-코드 수정 없이 가능, ToS 준수 GPT 인증 체인(API 키 → codex CLI → ChatGPT OAuth 옵션), HARD 모드(`/hard`) 신설,
+코드 수정 없이 가능, ToS 준수 GPT 인증 체인(API 키 → codex CLI, ChatGPT OAuth는 레거시 opt-in), HARD 모드(`/hard`) 신설,
 macOS 버그 2건 수정(CONOUT$ 쓰레기파일, install.sh timeout 즉사).
 
 **v5.0**: 에이전트 7→13개, 커맨드 3→11개, 스킬 시스템 신규 추가, OMO 패리티 ~90% 달성.
@@ -40,7 +43,7 @@ bash install.sh
 - CLAUDE.md 설치 (마커 기반 병합, `~/.claude/CLAUDE.md`)
 - settings.json 훅 8종 + MCP 등록
 - API 키를 Claude MCP env에 등록 (`claude mcp add -e`, 실패 시 settings.json 폴백)
-- GPT 인증 상태 확인 및 안내 (API 키 → codex CLI → ChatGPT OAuth opt-in 순)
+- GPT 인증 상태 확인 및 안내 (API 키 → codex CLI 기본, ChatGPT OAuth는 레거시 opt-in)
 
 이미 설치한 경우 업데이트:
 ```bash
@@ -66,7 +69,7 @@ C:\dev\claude-omo\update.bat
 | Claude Code CLI | `npm install -g @anthropic-ai/claude-code` |
 | Node.js | 18 이상 |
 | GLM_API_KEY | [Z.ai](https://open.bigmodel.cn) 발급 |
-| GPT 인증 | `OPENAI_API_KEY`(권장) 또는 `codex` CLI 로그인 또는 `~/.codex/auth.json` (아래 참고) |
+| GPT 인증 | `OPENAI_API_KEY`(권장) 또는 `codex` CLI 로그인 |
 
 > **⚠️ Linux 서버 주의**: `export KEY=...` (.bashrc)는 Claude Code MCP 프로세스에 전달되지 않는 경우가 있습니다.
 > `install.sh`는 `claude mcp add -e`로 MCP env에 키를 등록합니다. 이 값은 로컬 설정 파일에 남으므로
@@ -76,10 +79,9 @@ C:\dev\claude-omo\update.bat
 
 ## GPT 인증 — 서버(브라우저 없는 환경)
 
-GPT 인증은 `providers.json`의 `auth_priority`(`api_key` → `codex_cli` → `chatgpt_oauth`) 순서로
-자동 시도됩니다. 권장 순서는 `OPENAI_API_KEY` 또는 서버에서 직접 `codex login`입니다.
-ChatGPT OAuth(`~/.codex/auth.json`) 직접 사용은 기본 비활성화되어 있고, opt-in 마지막 수단입니다.
-전체 인증 경로 3종의 상세 비교는 아래 [ToS(이용약관) 준수](#tos이용약관-준수) 참고.
+GPT 인증은 기본적으로 `providers.json`의 `auth_priority`(`api_key` → `codex_cli`) 순서로 자동 시도됩니다.
+권장 순서는 `OPENAI_API_KEY` 또는 서버에서 직접 `codex login`입니다. ChatGPT OAuth(`~/.codex/auth.json`)
+직접 호출은 기본 인증 체인에서 제외된 레거시 opt-in 경로입니다.
 
 ```bash
 # 권장 1: 정식 OpenAI API 키
@@ -90,9 +92,7 @@ bash install.sh
 codex login
 ```
 
-브라우저가 없는 서버에서 `auth.json` 복사가 꼭 필요하면 root 계정 공유 대신 전용 사용자 계정으로
-복사하고, 파일 권한을 `chmod 600 ~/.codex/auth.json`으로 제한하세요. `auth.json`에는 갱신 토큰이
-포함될 수 있으므로 문서, 로그, 이슈, 채팅에 붙여넣지 마세요.
+브라우저가 없는 서버에서는 refresh token 파일 복사 대신 `OPENAI_API_KEY`를 MCP env로 등록하세요.
 
 ---
 
@@ -100,27 +100,26 @@ codex login
 
 | 모델 | 모델명 | 인증 | 설정 위치 |
 |------|--------|------|-----------|
-| GPT | `gpt-5.3-codex` | API 키 → codex CLI → ChatGPT OAuth(옵션) 순 자동 시도 | `OPENAI_API_KEY` / `codex login` / `~/.codex/auth.json` |
-| GLM | `glm-5` | API Key | `settings.json mcpServers.env` |
+| GPT | `gpt-5.3-codex` | API 키 → codex CLI 순 자동 시도 | `OPENAI_API_KEY` / `codex login` |
+| GLM | `glm-5` | API Key | Claude MCP env (`claude mcp add -e`, 실패 시 settings.json 폴백) |
 
 ---
 
 ## ToS(이용약관) 준수
 
-GPT 프로바이더는 3가지 인증 경로를 `providers.json`의 `auth_priority` 순서대로 자동 시도합니다.
-ChatGPT 계정의 OAuth 토큰을 MCP 서버가 직접 호출하는 방식은 이용약관 위반 소지가 있어 **기본
-비활성화**되어 있습니다.
+GPT 프로바이더는 기본적으로 2가지 인증 경로를 `providers.json`의 `auth_priority` 순서대로 자동 시도합니다.
+ChatGPT 계정의 OAuth 토큰을 MCP 서버가 직접 호출하는 방식은 이용약관 위반 소지가 있어 기본 인증 체인에서
+제외했습니다.
 
 | 우선순위 | 경로 | 방식 | ToS 상태 |
 |---------|------|------|----------|
 | 1 | `api_key` | `OPENAI_API_KEY` 환경변수 — 정식 OpenAI 플랫폼 API | 문제 없음 (권장) |
 | 2 | `codex_cli` | 이미 인증된 `codex` CLI(공식 클라이언트)를 서브프로세스로 경유 | 문제 없음 — 공식 클라이언트를 통한 합법적 사용 |
-| 3 | `chatgpt_oauth` | ChatGPT 계정의 OAuth 토큰을 MCP 서버가 직접 호출 | **기본 비활성화**(`allow_chatgpt_oauth: false`). ToS 위반 소지 있어 opt-in 시에만 사용, 최초 호출 시 stderr 경고 출력 |
+| 레거시 opt-in | `chatgpt_oauth` | ChatGPT 계정의 OAuth 토큰을 MCP 서버가 직접 호출 | 기본 인증 체인에서 제외. `auth_priority`에 직접 추가하고 `allow_chatgpt_oauth: true`일 때만 사용 |
 
 GLM은 표준 유료 API(Z.ai)를 사용하므로 ToS 문제가 없습니다.
 
-`chatgpt_oauth`를 켜려면 `providers.json`에서 `providers.gpt.auth.allow_chatgpt_oauth`를 `true`로
-바꾸고 `codex login`으로 로그인하세요. 켜지 않는 것을 권장하며, 1·2번 경로로 충분히 커버됩니다.
+`chatgpt_oauth`는 기존 설치 호환용으로만 남아 있습니다. 새 설치는 1·2번 경로로 커버하세요.
 
 ---
 
@@ -298,7 +297,7 @@ task(category="visual-engineering", load_skills=["frontend-ui-ux", "playwright"]
 | `enabled` | `false`로 두면 해당 `ask_<name>` 툴이 생성되지 않고 라우팅/병렬 호출에서도 제외 |
 | `base_url` | API 엔드포인트 |
 | `auth.api_key_env` | API 키를 읽을 환경변수명. 비어있고 `base_url`이 localhost면 무인증 허용(Ollama 등) |
-| `auth.auth_priority` | GPT처럼 인증 경로가 여럿일 때 시도 순서(`api_key`/`codex_cli`/`chatgpt_oauth`) |
+| `auth.auth_priority` | GPT처럼 인증 경로가 여럿일 때 시도 순서. 기본값은 `api_key`/`codex_cli`, `chatgpt_oauth`는 레거시 opt-in |
 | `default_model` / `models` | 기본 모델 및 선택 가능한 모델 목록(enum) |
 | `supports_reasoning_effort` / `supports_temperature` | 툴 파라미터에 해당 옵션을 조건부로 추가 |
 | `routing` | `smart_route`가 쓰는 카테고리별 provider/effort/fallback 테이블 |
@@ -365,16 +364,21 @@ claude mcp get multi-model-agent
 
 # API 키 확인
 python3 -c "
-import json, subprocess, sys
+import json, os, pathlib, subprocess
 result = subprocess.run(['claude', 'mcp', 'get', 'multi-model-agent'], capture_output=True, text=True)
 print('MCP 등록:', '✅' if 'multi-model-agent' in result.stdout else '❌ 미등록')
-s = json.load(open('$HOME/.claude/settings.json'))
-env = s.get('mcpServers',{}).get('multi-model-agent',{}).get('env',{})
+env = {}
+for path in [pathlib.Path.home()/'.claude.json', pathlib.Path.home()/'.claude/settings.json']:
+    try:
+        data = json.loads(path.read_text())
+        env.update(data.get('mcpServers',{}).get('multi-model-agent',{}).get('env',{}))
+    except Exception:
+        pass
 print('GLM_API_KEY:   ', '✅' if env.get('GLM_API_KEY') else '❌ 없음')
-print('OPENAI_API_KEY:', '✅' if env.get('OPENAI_API_KEY') else '❌ 없음 (codex CLI 또는 auth.json으로 폴백)')
+print('OPENAI_API_KEY:', '✅' if env.get('OPENAI_API_KEY') else '❌ 없음 (codex CLI로 폴백)')
 "
 
-# GPT auth — 위 OPENAI_API_KEY/codex CLI가 모두 없고 chatgpt_oauth를 opt-in 했을 때만 쓰임
+# Legacy GPT auth — chatgpt_oauth를 명시 opt-in 했을 때만 참고
 python3 -c "
 import json
 d = json.load(open('$HOME/.codex/auth.json'))

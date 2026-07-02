@@ -4,10 +4,30 @@ on:
   push:
     paths:
       - "mcp-server/**"
+      - "install.sh"
+      - "commands/**"
+      - "agents/**"
+      - "skills/**"
+      - "README.md"
+      - "TROUBLESHOOT.md"
+      - "CHANGELOG.md"
+      - "CLAUDE.md"
+      - "WINDOWS_FIXES.md"
+      - "update.bat"
       - ".github/workflows/mcp-server-ci.yml"
   pull_request:
     paths:
       - "mcp-server/**"
+      - "install.sh"
+      - "commands/**"
+      - "agents/**"
+      - "skills/**"
+      - "README.md"
+      - "TROUBLESHOOT.md"
+      - "CHANGELOG.md"
+      - "CLAUDE.md"
+      - "WINDOWS_FIXES.md"
+      - "update.bat"
       - ".github/workflows/mcp-server-ci.yml"
 
 jobs:
@@ -27,3 +47,16 @@ jobs:
       - run: npm test
       - run: npm run selftest
       - run: npm audit --omit=dev
+
+  release-surface-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - run: bash -n install.sh
+      - run: |
+          if grep -R "git add -A" commands/update-omo.md update.bat; then
+            echo "Broad git staging is not allowed in update automation"
+            exit 1
+          fi
+      - run: |
+          node -e "const p=require('./mcp-server/providers.json'); const a=p.providers.gpt.auth; if (a.auth_priority.includes('chatgpt_oauth')) { throw new Error('chatgpt_oauth must not be in default auth_priority'); }"

@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
@@ -91,6 +91,7 @@ test("ulw-detector accepts explicit ULW trigger", () => {
 
   assert.equal(result.status, 0);
   assert.match(result.stdout, /ULW MODE/);
+  assert.match(result.stdout, /blocker가 2회 반복/);
   assert.match(result.stderr, /ULW MODE/);
 });
 
@@ -101,6 +102,7 @@ test("ulw-detector accepts explicit HARD trigger", () => {
 
   assert.equal(result.status, 0);
   assert.match(result.stdout, /HARD MODE/);
+  assert.match(result.stdout, /blocker가 2회 반복/);
   assert.match(result.stderr, /HARD MODE/);
 });
 
@@ -114,4 +116,7 @@ test("provider selftest keeps quick route aligned with docs", () => {
   assert.equal(output.routing.quick.provider, "gpt");
   assert.equal(output.routing.quick.effort, "none");
   assert.deepEqual(output.routing.quick.fallback, ["glm"]);
+  const providers = JSON.parse(readFileSync(join(ROOT, "providers.json"), "utf8"));
+  assert.deepEqual(providers.providers.gpt.auth.auth_priority, ["api_key", "codex_cli"]);
+  assert.equal(providers.providers.gpt.auth.allow_chatgpt_oauth, false);
 });

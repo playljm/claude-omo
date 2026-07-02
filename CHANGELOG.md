@@ -1,5 +1,15 @@
 # Changelog
 
+## [6.0.2] - 2026-07-02
+
+### Fixed - review follow-up hardening
+
+- **ULW/HARD runaway guard**: `ulw-detector.js`가 실제로 주입하는 ULW/HARD 지시문에 반복 검증 실패, 외부 모델 실패, 사용자 결정 blocker 2회 반복 시 중단·보고 규칙 추가
+- **업데이트 안전성**: `/update-omo`와 `update.bat`을 검증 우선 순서로 변경해 테스트 실패 전에는 프로젝트/글로벌 `.claude`를 덮어쓰지 않음
+- **Git staging 제한**: 업데이트 자동화의 `git add -A` 제거, 레포 소스 allowlist만 stage하도록 변경
+- **CI 범위 확장**: GitHub Actions가 `install.sh`, `commands/**`, `agents/**`, `skills/**`, 문서, `update.bat` 변경에도 실행되도록 확대하고 release-surface smoke 검증 추가
+- **인증 정책 강화**: 기본 GPT 인증 체인에서 `chatgpt_oauth` 제거. `OPENAI_API_KEY` → `codex_cli`만 기본 시도하고 ChatGPT OAuth 직접 호출은 레거시 opt-in으로 분리
+
 ## [6.0.1] - 2026-07-02
 
 ### Fixed - feedback hardening

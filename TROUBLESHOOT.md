@@ -10,9 +10,10 @@ Linux(Ubuntu / Rocky) 서버에서 반복적으로 발생하는 문제와 해결
 |------------|------|--------|
 | `GLM_API_KEY 환경변수 없음` | .bashrc가 MCP에 전달 안 됨 | [→ GLM 환경변수 주입](#1-glm-환경변수-없음) |
 | `insufficient balance` | 위와 동일 (잔액이 아님) | [→ GLM 환경변수 주입](#1-glm-환경변수-없음) |
-| `~/.codex/auth.json 파일이 없습니다` | API 키/codex CLI/OAuth opt-in 모두 없음 | [→ GPT 인증 설정](#2-gpt-인증-설정) |
-| `access_token이 없습니다` | auth.json 구조 불완전 | [→ auth.json 구조 확인](#3-gpt-토큰-구조-불완전) |
-| `토큰이 만료되었고 refresh_token이 없습니다` | 오래된 auth.json | [→ auth.json 재복사](#4-gpt-토큰-만료) |
+| `GPT 인증 실패` | API 키/codex CLI 모두 없음 | [→ GPT 인증 설정](#2-gpt-인증-설정) |
+| `~/.codex/auth.json 파일이 없습니다` | 레거시 OAuth opt-in 상태에서 토큰 없음 | [→ GPT 인증 우선순위](#8-gpt-인증-우선순위와-oauth-제한) |
+| `access_token이 없습니다` | 레거시 OAuth auth.json 구조 불완전 | [→ 레거시 OAuth 토큰 문제](#3-gpt--레거시-oauth-토큰-구조-불완전) |
+| `토큰이 만료되었고 refresh_token이 없습니다` | 레거시 OAuth 토큰 만료 | [→ 레거시 OAuth 토큰 만료](#4-gpt--레거시-oauth-토큰-만료) |
 | `api.responses.write 스코프가 없습니다` | ChatGPT OAuth 직접 호출 opt-in 상태에서 스코프 부족 | [→ GPT 인증 우선순위](#8-gpt-인증-우선순위와-oauth-제한) |
 | `SessionEnd IndexError` | settings.json 빈 배열 | install.sh 재실행 |
 | `settings.json 경로 오류` | Windows Git Bash 경로 | install.sh 재실행 |
@@ -25,7 +26,7 @@ Linux(Ubuntu / Rocky) 서버에서 반복적으로 발생하는 문제와 해결
 
 | 모델 | 모델명 | 인증 방식 | 필요한 것 |
 |------|--------|-----------|-----------|
-| **GPT** | `gpt-5.3-codex` | API 키 → codex CLI → ChatGPT OAuth opt-in | `OPENAI_API_KEY` 또는 `codex login` 권장 |
+| **GPT** | `gpt-5.3-codex` | API 키 → codex CLI | `OPENAI_API_KEY` 또는 `codex login` |
 | **GLM** | `glm-5` | API Key | `GLM_API_KEY` in Claude MCP env |
 
 > **핵심**: Linux에서 `.bashrc` export는 MCP 서버에 **전달되지 않음**.
@@ -86,11 +87,13 @@ cat ~/.claude/settings.json
 
 ### 증상
 ```
-~/.codex/auth.json 파일이 없습니다. 터미널에서 `codex login`을 실행하세요.
+GPT 인증 실패. 다음 중 하나를 설정하세요:
+  방법 1) OPENAI_API_KEY 환경변수 설정
+  방법 2) codex CLI 설치 후 `codex login`
 ```
 
 ### 원인
-`OPENAI_API_KEY`, `codex` CLI 인증, ChatGPT OAuth opt-in 경로가 모두 실패함.
+`OPENAI_API_KEY`와 `codex` CLI 인증이 모두 실패함.
 
 ### 해결법
 
@@ -105,16 +108,7 @@ cd ~/claude-omo && bash install.sh
 codex login
 ```
 
-**방법 3 — auth.json 복사 (마지막 수단)**
-```bash
-# 전용 사용자 계정으로만 복사. root 공유 금지.
-ssh <user>@<서버IP> "mkdir -p ~/.codex && chmod 700 ~/.codex"
-scp ~/.codex/auth.json <user>@<서버IP>:~/.codex/auth.json
-ssh <user>@<서버IP> "chmod 600 ~/.codex/auth.json"
-```
-
-`auth.json`에는 refresh token이 들어갈 수 있음. 문서/로그/이슈/채팅에 원문을 붙여넣지 말 것.
-ChatGPT OAuth 직접 호출은 `providers.json`에서 `allow_chatgpt_oauth: true`로 opt-in해야 하며 권장하지 않음.
+브라우저 없는 서버에서는 `auth.json` 복사 대신 `OPENAI_API_KEY`를 MCP env로 등록.
 
 **확인**
 ```bash
@@ -123,7 +117,7 @@ node ~/mcp-servers/multi-model/index.js --selftest
 
 ---
 
-## 3. GPT — 토큰 구조 불완전
+## 3. GPT — 레거시 OAuth 토큰 구조 불완전
 
 ### 증상
 ```
@@ -131,7 +125,7 @@ access_token이 없습니다. `codex login`으로 재인증이 필요합니다.
 ```
 
 ### 원인
-auth.json이 있지만 `tokens.access_token` 필드가 없음.
+레거시 `chatgpt_oauth`를 opt-in한 상태에서 auth.json에 `tokens.access_token` 필드가 없음.
 
 ### 확인
 ```bash
@@ -147,12 +141,11 @@ PY
 토큰 값 자체는 출력하지 않음.
 
 ### 해결법
-가능하면 `OPENAI_API_KEY` 또는 서버에서 `codex login`을 사용. 복사가 꼭 필요하면 전용 사용자 계정으로
-권한을 제한해 재복사.
+`providers.json`에서 `chatgpt_oauth` opt-in을 끄고 `OPENAI_API_KEY` 또는 공식 `codex` CLI 경로로 전환.
 
 ---
 
-## 4. GPT — 토큰 만료
+## 4. GPT — 레거시 OAuth 토큰 만료
 
 ### 증상
 ```
@@ -161,8 +154,8 @@ PY
 ```
 
 ### 원인
-- `refresh_token` 없이 `access_token`만 있는 auth.json
-- 또는 refresh_token도 만료됨 (장기 미사용)
+- 레거시 `chatgpt_oauth`를 opt-in한 상태
+- `refresh_token` 없이 `access_token`만 있는 auth.json 또는 refresh_token 만료
 
 ### 해결법
 권장 순서:
@@ -174,7 +167,7 @@ export OPENAI_API_KEY=sk-...
 codex login
 ```
 
-브라우저 없는 서버라서 복사가 불가피하면 전용 사용자 계정으로 복사하고 `chmod 600 ~/.codex/auth.json`을 적용.
+브라우저 없는 서버에서는 `OPENAI_API_KEY` 등록을 우선 사용.
 
 ---
 
@@ -283,16 +276,22 @@ echo "[MCP 서버]"
 ls ~/mcp-servers/multi-model/index.js 2>/dev/null && echo "✅ 설치됨" || echo "❌ 없음"
 
 echo ""
-echo "[settings.json env]"
+echo "[MCP env]"
 python3 -c "
-import json
-s = json.load(open('$HOME/.claude/settings.json'))
-env = s.get('mcpServers', {}).get('multi-model-agent', {}).get('env', {})
+import json, pathlib
+env = {}
+for path in [pathlib.Path.home()/'.claude.json', pathlib.Path.home()/'.claude/settings.json']:
+    try:
+        data = json.loads(path.read_text())
+        env.update(data.get('mcpServers', {}).get('multi-model-agent', {}).get('env', {}))
+    except Exception:
+        pass
 print('GLM_API_KEY:', '✅' if env.get('GLM_API_KEY') else '❌ 없음')
-" 2>/dev/null || echo "❌ settings.json 파싱 실패"
+print('OPENAI_API_KEY:', '✅' if env.get('OPENAI_API_KEY') else '❌ 없음')
+" 2>/dev/null || echo "❌ MCP env 확인 실패"
 
 echo ""
-echo "[GPT auth.json]"
+echo "[Legacy GPT OAuth auth.json - optional]"
 python3 -c "
 import json
 d = json.load(open('$HOME/.codex/auth.json'))
@@ -320,16 +319,17 @@ print('SessionEnd hook:', '✅' if sess else '❌')
 
 ### 현재 v6.0+ 동작
 
-GPT 프로바이더는 `providers.json`의 `auth_priority` 순서대로 인증을 시도함.
+GPT 프로바이더는 `providers.json`의 `auth_priority` 순서대로 인증을 시도함. 기본값은
+`api_key` → `codex_cli`까지만 포함함.
 
 | 우선순위 | 방식 | 상태 |
 |----------|------|------|
 | 1순위 | `OPENAI_API_KEY` | 권장. 정식 OpenAI 플랫폼 API |
 | 2순위 | `codex` CLI | 권장. 공식 CLI를 서브프로세스로 실행 |
-| 3순위 | ChatGPT OAuth `auth.json` | 기본 비활성화. `allow_chatgpt_oauth: true`일 때만 시도 |
+| 레거시 opt-in | ChatGPT OAuth `auth.json` | 기본 인증 체인에서 제외. 직접 `auth_priority`에 추가해야 시도 |
 
-`auth.json`의 ChatGPT OAuth 토큰을 MCP 서버가 직접 API 호출에 쓰는 방식은 ToS 리스크가 있어 기본적으로
-꺼져 있음. 켠 경우에도 현재 코드는 `api.responses.write` 스코프가 없으면 실패시키고,
+`auth.json`의 ChatGPT OAuth 토큰을 MCP 서버가 직접 API 호출에 쓰는 방식은 ToS 리스크가 있어 기본 인증
+체인에서 제외되어 있음. 켠 경우에도 현재 코드는 `api.responses.write` 스코프가 없으면 실패시키고,
 Codex backend 직접 호출로 자동 우회하지 않음.
 
 ### `api.responses.write 스코프가 없습니다`
@@ -345,13 +345,14 @@ cd ~/claude-omo && bash install.sh
 codex login
 ```
 
-ChatGPT OAuth를 계속 쓰려면 `providers.json`에서 명시적으로 opt-in:
+ChatGPT OAuth를 계속 쓰려면 `providers.json`에서 명시적으로 우선순위와 opt-in을 모두 설정:
 
 ```json
 {
   "providers": {
     "gpt": {
       "auth": {
+        "auth_priority": ["api_key", "codex_cli", "chatgpt_oauth"],
         "allow_chatgpt_oauth": true
       }
     }
@@ -359,7 +360,7 @@ ChatGPT OAuth를 계속 쓰려면 `providers.json`에서 명시적으로 opt-in:
 }
 ```
 
-단, 이 경로는 권장하지 않음. 토큰 파일은 `chmod 600 ~/.codex/auth.json`으로 제한하고 원문을 출력하지 말 것.
+단, 이 경로는 권장하지 않음. 토큰 파일 원문은 출력하지 말 것.
 
 ---
 
@@ -371,6 +372,6 @@ ChatGPT OAuth를 계속 쓰려면 `providers.json`에서 명시적으로 opt-in:
 - [ ] `npm install -g @anthropic-ai/claude-code`
 - [ ] `git clone https://github.com/playljm/claude-omo`
 - [ ] `bash claude-omo/install.sh` (GLM_API_KEY, OPENAI_API_KEY 입력)
-- [ ] `codex login` 서버 직접 실행 또는, 불가피한 경우 전용 사용자 계정으로 `~/.codex/auth.json` 복사 후 `chmod 600`
+- [ ] `OPENAI_API_KEY` 입력 또는 서버에서 `codex login` 직접 실행
 - [ ] Claude Code 재시작
 - [ ] `/compare 안녕?` 으로 2모델 동작 확인

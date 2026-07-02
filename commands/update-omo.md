@@ -32,17 +32,35 @@ git -C "$REPO" status --short
 
 변경사항이 없으면 "변경사항 없음" 출력 후 종료.
 
-### Step 2 — 프로젝트 레벨 .claude 동기화
+### Step 2 — 검증
+
+```bash
+if [ -f "$REPO/mcp-server/package.json" ]; then
+  (
+    cd "$REPO/mcp-server"
+    npm ci
+    npm test
+    npm run selftest
+    npm audit --omit=dev
+  )
+fi
+
+bash -n "$REPO/install.sh"
+```
+
+검증 실패 시 동기화·커밋·push 금지.
+
+### Step 3 — 프로젝트 레벨 .claude 동기화
 
 ```bash
 mkdir -p "$PROJ/agents" "$PROJ/commands"
 cp -f "$REPO"/agents/*.md "$PROJ/agents/"
 cp -f "$REPO"/commands/*.md "$PROJ/commands/"
 
-echo "agents: $(ls $PROJ/agents/*.md | wc -l)개, commands: $(ls $PROJ/commands/*.md | wc -l)개 동기화 완료"
+echo "agents: $(ls "$PROJ"/agents/*.md | wc -l)개, commands: $(ls "$PROJ"/commands/*.md | wc -l)개 동기화 완료"
 ```
 
-### Step 3 — ~/.claude/ 동기화 (글로벌)
+### Step 4 — ~/.claude/ 동기화 (글로벌)
 
 ```bash
 if [ -n "$USERPROFILE" ]; then
@@ -63,27 +81,25 @@ if ! diff -q "$REPO/CLAUDE.md" "$GLOBAL/CLAUDE.md" >/dev/null 2>&1; then
 fi
 ```
 
-### Step 4 — 검증
-
-```bash
-if [ -f "$REPO/mcp-server/package.json" ]; then
-  (
-    cd "$REPO/mcp-server"
-    npm ci
-    npm test
-    npm run selftest
-    npm audit --omit=dev
-  )
-fi
-```
-
-검증 실패 시 커밋·push 금지.
-
 ### Step 5 — Git 커밋 & Push
 
 ```bash
 cd "$REPO"
-git add -A
+STAGE_PATHS=(
+  ".github"
+  "agents"
+  "commands"
+  "skills"
+  "mcp-server"
+  "CHANGELOG.md"
+  "CLAUDE.md"
+  "README.md"
+  "TROUBLESHOOT.md"
+  "WINDOWS_FIXES.md"
+  "install.sh"
+  "update.bat"
+)
+git add -- "${STAGE_PATHS[@]}"
 
 # 변경사항 있을 때만 커밋
 if ! git diff --cached --quiet; then
