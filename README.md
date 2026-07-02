@@ -1,9 +1,12 @@
 # claude-omo
 
-**OMO(oh-my-opencode) 스타일 멀티모델 오케스트레이션 — Claude Code 네이티브 구현 v6.0.2**
+**OMO(oh-my-opencode) 스타일 멀티모델 오케스트레이션 — Claude Code 네이티브 구현 v6.0.3**
 
 GPT / GLM 두 모델을 카테고리 기반으로 자동 라우팅하고,
 OMO의 핵심 에이전트 패턴을 Claude Code 프리미티브로 이식한 설정 모음.
+
+**v6.0.3**: 인증 UX 개선 — `auth-setup.js` 추가. API 키 숨김 입력, 현재 상태 확인, MCP env 재설정,
+`codex login` 실행 안내를 설치와 분리.
 
 **v6.0.2**: 리뷰 후 추가 보강 — ULW/HARD 실제 주입문 runaway guard, 검증 우선 업데이트 스크립트,
 allowlist staging, CI 범위 확장, ChatGPT OAuth 기본 인증 체인 제외.
@@ -38,11 +41,11 @@ bash install.sh
 
 설치 스크립트가 다음을 자동 처리합니다:
 - MCP 서버 설치 (`~/mcp-servers/multi-model/`), `providers.json` 보존/기본값 설치
-- 에이전트 13개 + 커맨드 15개 복사 (`~/.claude/`)
+- 에이전트 13개 + 커맨드 16개 복사 (`~/.claude/`)
 - 스킬 3개 복사 (`~/.claude/skills/`)
 - CLAUDE.md 설치 (마커 기반 병합, `~/.claude/CLAUDE.md`)
 - settings.json 훅 8종 + MCP 등록
-- API 키를 Claude MCP env에 등록 (`claude mcp add -e`, 실패 시 settings.json 폴백)
+- API 키를 숨김 입력으로 받고 Claude MCP env에 저장 (`auth-setup.js`, 실패 시 settings.json 폴백)
 - GPT 인증 상태 확인 및 안내 (API 키 → codex CLI 기본, ChatGPT OAuth는 레거시 opt-in)
 
 이미 설치한 경우 업데이트:
@@ -72,7 +75,7 @@ C:\dev\claude-omo\update.bat
 | GPT 인증 | `OPENAI_API_KEY`(권장) 또는 `codex` CLI 로그인 |
 
 > **⚠️ Linux 서버 주의**: `export KEY=...` (.bashrc)는 Claude Code MCP 프로세스에 전달되지 않는 경우가 있습니다.
-> `install.sh`는 `claude mcp add -e`로 MCP env에 키를 등록합니다. 이 값은 로컬 설정 파일에 남으므로
+> `install.sh`는 키를 숨김 입력으로 받은 뒤 MCP env에 저장합니다. 이 값은 로컬 설정 파일에 남으므로
 > 해당 계정 홈 디렉터리 권한을 보호하세요.
 
 ---
@@ -96,12 +99,33 @@ codex login
 
 ---
 
+## 인증만 다시 설정
+
+설치 후 키를 바꾸거나 상태만 확인할 때는 전체 설치를 다시 돌리지 않아도 됩니다.
+
+```bash
+# 대화형 설정: 현재 상태 표시 → 숨김 입력 → MCP env 저장
+node ~/mcp-servers/multi-model/auth-setup.js
+
+# 상태만 확인
+node ~/mcp-servers/multi-model/auth-setup.js --status
+
+# 이미 쉘 환경변수에 키가 있을 때 저장만 수행
+GLM_API_KEY="$GLM_API_KEY" OPENAI_API_KEY="$OPENAI_API_KEY" \
+  node ~/mcp-servers/multi-model/auth-setup.js --apply-env
+```
+
+대화형 설정에서 `Enter`는 기존 값 유지, `-`는 삭제입니다. 입력한 키 값은 화면에 표시하지 않습니다.
+변경 후 Claude Code를 재시작해야 새 MCP env가 반영됩니다.
+
+---
+
 ## 모델별 인증 방식
 
 | 모델 | 모델명 | 인증 | 설정 위치 |
 |------|--------|------|-----------|
 | GPT | `gpt-5.3-codex` | API 키 → codex CLI 순 자동 시도 | `OPENAI_API_KEY` / `codex login` |
-| GLM | `glm-5` | API Key | Claude MCP env (`claude mcp add -e`, 실패 시 settings.json 폴백) |
+| GLM | `glm-5` | API Key | Claude MCP env (`auth-setup.js`, 실패 시 settings.json 폴백) |
 
 ---
 
@@ -132,6 +156,7 @@ claude-omo/
 ├── TROUBLESHOOT.md              # Linux 서버 문제 해결 가이드
 ├── mcp-server/                  # Multi-Model MCP 서버 v6.0 (providers.json 플러그인 아키텍처)
 │   ├── index.js                 # loadProviders, callProvider(kind 3종), smart_route, ask_parallel
+│   ├── auth-setup.js            # API 키 숨김 입력 + MCP env 상태 확인/저장
 │   ├── providers.json           # 프로바이더 정의(gpt/glm) + routing 테이블 [NEW v6.0]
 │   ├── ulw-detector.js          # ULW/HARD 모드 훅 (UserPromptSubmit)
 │   ├── session-summary.js       # 세션 요약
@@ -221,6 +246,7 @@ claude-omo/
 | `/cancel-ralph` | Ralph Loop 취소 |
 | `/finish` | 작업 마무리 체크리스트 (검증 → 문서 → 커밋) |
 | `/usage [일수]` | 외부 모델(GPT/GLM) 토큰 사용량 통계 |
+| `/auth-setup` | API 키와 GPT 인증 상태 확인·재설정 |
 | `/update-omo [msg]` | claude-omo 변경사항 배포 + GitHub push |
 | `/hard <작업>` | HARD 모드 — 최상위 모델 + 최대 병렬 + 이중/교차 검증 [NEW v6.0] |
 

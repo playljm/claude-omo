@@ -120,3 +120,48 @@ test("provider selftest keeps quick route aligned with docs", () => {
   assert.deepEqual(providers.providers.gpt.auth.auth_priority, ["api_key", "codex_cli"]);
   assert.equal(providers.providers.gpt.auth.allow_chatgpt_oauth, false);
 });
+
+test("auth-setup stores env without printing secret values", () => {
+  const dir = mkdtempSync(join(tmpdir(), "omo-auth-setup-"));
+  try {
+    const configPath = join(dir, "claude.json");
+    const glmKey = "test-glm-key-value";
+    const openaiKey = "test-openai-key-value";
+
+    const applyResult = spawnSync(
+      process.execPath,
+      [join(ROOT, "auth-setup.js"), "--apply-env", "--config", configPath, "--mcp-dir", ROOT],
+      {
+        encoding: "utf8",
+        env: {
+          ...process.env,
+          GLM_API_KEY: glmKey,
+          OPENAI_API_KEY: openaiKey,
+        },
+      },
+    );
+
+    assert.equal(applyResult.status, 0);
+    assert.doesNotMatch(applyResult.stdout, new RegExp(glmKey));
+    assert.doesNotMatch(applyResult.stdout, new RegExp(openaiKey));
+
+    const config = JSON.parse(readFileSync(configPath, "utf8"));
+    const env = config.mcpServers["multi-model-agent"].env;
+    assert.equal(env.GLM_API_KEY, glmKey);
+    assert.equal(env.OPENAI_API_KEY, openaiKey);
+
+    const statusResult = spawnSync(
+      process.execPath,
+      [join(ROOT, "auth-setup.js"), "--status", "--config", configPath],
+      { encoding: "utf8" },
+    );
+
+    assert.equal(statusResult.status, 0);
+    assert.match(statusResult.stdout, /GLM_API_KEY: 설정됨/);
+    assert.match(statusResult.stdout, /OPENAI_API_KEY: 설정됨/);
+    assert.doesNotMatch(statusResult.stdout, new RegExp(glmKey));
+    assert.doesNotMatch(statusResult.stdout, new RegExp(openaiKey));
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

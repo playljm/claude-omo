@@ -37,6 +37,13 @@ if exist "%REPO_DIR%\mcp-server\package.json" (
         pause
         exit /b 1
     )
+    call node auth-setup.js --status --config "%TEMP%\omo_auth_status.json"
+    if errorlevel 1 (
+        popd
+        echo [오류] auth-setup 상태 확인 실패
+        pause
+        exit /b 1
+    )
     call npm audit --omit=dev
     if errorlevel 1 (
         popd

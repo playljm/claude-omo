@@ -46,12 +46,14 @@ jobs:
       - run: npm ci
       - run: npm test
       - run: npm run selftest
+      - run: node auth-setup.js --status --config "$RUNNER_TEMP/claude.json"
       - run: npm audit --omit=dev
 
   release-surface-smoke:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
+      - run: node --check mcp-server/auth-setup.js
       - run: bash -n install.sh
       - run: |
           if grep -R "git add -A" commands/update-omo.md update.bat; then
@@ -60,3 +62,4 @@ jobs:
           fi
       - run: |
           node -e "const p=require('./mcp-server/providers.json'); const a=p.providers.gpt.auth; if (a.auth_priority.includes('chatgpt_oauth')) { throw new Error('chatgpt_oauth must not be in default auth_priority'); }"
+      - run: node mcp-server/auth-setup.js --status --config "$RUNNER_TEMP/claude.json"

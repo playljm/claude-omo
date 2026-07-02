@@ -109,8 +109,9 @@ collect_key() {
     return 0
   fi
   if [[ -n "$current" ]]; then
-    echo -n "  $varname [현재 환경변수 사용: ${current:0:6}...]: " >&2
-    read -r input
+    echo -n "  $varname [현재 환경변수 사용, Enter=유지]: " >&2
+    read -r -s input
+    echo "" >&2
     if [[ -z "$input" ]]; then
       echo "$current"
     else
@@ -118,8 +119,9 @@ collect_key() {
     fi
   else
     echo "  $varname 없음 → $prompt_url" >&2
-    echo -n "  입력 (엔터=건너뜀): " >&2
-    read -r input
+    echo -n "  입력값 숨김 (엔터=건너뜀): " >&2
+    read -r -s input
+    echo "" >&2
     echo "${input:-}"
   fi
 }
@@ -220,7 +222,7 @@ for _src in "$REPO_DIR/commands/"*.md; do
 done
 
 CMD_COUNT=$(ls "$CLAUDE_DIR/commands/"*.md 2>/dev/null | wc -l | tr -d ' ')
-info "커맨드 ${CMD_COUNT}개 복사 완료 (plan, route, compare, ralph-loop, ulw-loop, handoff, init-deep, start-work, stop-continuation, cancel-ralph, refactor, finish, usage, hard)"
+info "커맨드 ${CMD_COUNT}개 복사 완료 (plan, route, compare, auth-setup, ralph-loop, ulw-loop, handoff, init-deep, start-work, stop-continuation, cancel-ralph, refactor, finish, usage, hard)"
 
 # ─── 6a. 스킬 복사 ─────────────────────
 step "스킬 복사: $CLAUDE_DIR/skills/"
@@ -364,12 +366,7 @@ if command -v claude &>/dev/null; then
   # 기존 등록 제거 (오류 무시 — 없는 경우 포함)
   claude mcp remove multi-model-agent 2>/dev/null || true
 
-  # ENV 플래그 배열 구성 (bash 배열로 특수문자 안전 처리)
-  # 주의: 이름(multi-model-agent)이 -e 플래그보다 먼저 와야 함
-  # (claude mcp add의 <env...> 가변인자가 이름을 env값으로 잘못 파싱하는 버그 방지)
   _mcp_add_args=(claude mcp add --scope user multi-model-agent)
-  [[ -n "$GLM_KEY"     ]] && _mcp_add_args+=(-e "GLM_API_KEY=$GLM_KEY")
-  [[ -n "$OPENAI_KEY"  ]] && _mcp_add_args+=(-e "OPENAI_API_KEY=$OPENAI_KEY")
   _mcp_add_args+=(-- "$NODE_BIN_WIN" "$MCP_NODE_PATH/index.js")
 
   if "${_mcp_add_args[@]}" 2>/dev/null; then
@@ -386,12 +383,18 @@ if command -v claude &>/dev/null; then
   fi
 fi
 
+if [[ "$MCP_REGISTERED" == "true" ]]; then
+  GLM_API_KEY="$GLM_KEY" OPENAI_API_KEY="$OPENAI_KEY" \
+    node "$MCP_DIR/auth-setup.js" --apply-env --config "$HOME/.claude.json" --mcp-dir "$MCP_DIR" --quiet
+  info "MCP env 저장 완료 (.claude.json)"
+fi
+
 if [[ "$MCP_REGISTERED" == "false" ]]; then
   warn "settings.json 직접 편집으로 MCP 등록 (claude CLI 미사용 또는 실패 시 폴백)"
-  $PYTHON_CMD - "$SETTINGS_WIN" "$MCP_NODE_PATH" "$GLM_KEY" "$NODE_BIN_WIN" "$OPENAI_KEY" <<'PYEOF'
+  $PYTHON_CMD - "$SETTINGS_WIN" "$MCP_NODE_PATH" "$NODE_BIN_WIN" <<'PYEOF'
 import json, sys
 
-settings_path, mcp_path, glm_key, node_bin, openai_key = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4], sys.argv[5]
+settings_path, mcp_path, node_bin = sys.argv[1], sys.argv[2], sys.argv[3]
 
 try:
     with open(settings_path, 'r', encoding='utf-8') as f:
@@ -400,23 +403,15 @@ except (json.JSONDecodeError, FileNotFoundError):
     s = {}
 
 mcp_servers = s.setdefault("mcpServers", {})
-
-# 기존 env 보존 후 업데이트
 existing_env = mcp_servers.get("multi-model-agent", {}).get("env", {})
-mcp_env = {}
-if glm_key:    mcp_env["GLM_API_KEY"]    = glm_key
-if openai_key: mcp_env["OPENAI_API_KEY"] = openai_key
-for k, v in existing_env.items():
-    if k not in mcp_env:
-        mcp_env[k] = v
 
 mcp_entry = {
     "type": "stdio",
     "command": node_bin,
     "args": [f"{mcp_path}/index.js"]
 }
-if mcp_env:
-    mcp_entry["env"] = mcp_env
+if existing_env:
+    mcp_entry["env"] = existing_env
 
 mcp_servers["multi-model-agent"] = mcp_entry
 
@@ -424,10 +419,13 @@ with open(settings_path, 'w', encoding='utf-8') as f:
     json.dump(s, f, indent=2, ensure_ascii=False)
 
 print(f"  MCP 등록: multi-model-agent → {mcp_path}/index.js")
-keys_str = ", ".join(mcp_env.keys()) if mcp_env else "없음"
+keys_str = ", ".join(existing_env.keys()) if existing_env else "없음"
 print(f"  env 주입: {keys_str}")
 PYEOF
   info "settings.json MCP 등록 완료"
+  GLM_API_KEY="$GLM_KEY" OPENAI_API_KEY="$OPENAI_KEY" \
+    node "$MCP_DIR/auth-setup.js" --apply-env --config "$SETTINGS" --mcp-dir "$MCP_DIR" --quiet
+  info "MCP env 저장 완료 (settings.json)"
 fi
 
 CODEX_AUTH="$HOME/.codex/auth.json"

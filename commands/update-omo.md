@@ -41,6 +41,7 @@ if [ -f "$REPO/mcp-server/package.json" ]; then
     npm ci
     npm test
     npm run selftest
+    node auth-setup.js --status --config "/tmp/claude-omo-auth-status.json"
     npm audit --omit=dev
   )
 fi

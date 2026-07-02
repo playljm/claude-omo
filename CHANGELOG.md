@@ -1,5 +1,14 @@
 # Changelog
 
+## [6.0.3] - 2026-07-02
+
+### Added - authentication setup UX
+
+- **`auth-setup.js`**: API 키와 GPT 인증 상태를 설치와 분리해 확인·재설정하는 대화형 CLI 추가. 숨김 입력, `Enter=유지`, `-=삭제`, `--status`, `--apply-env` 지원
+- **`/auth-setup` 커맨드**: Claude Code 안에서 인증 재설정 방법을 바로 찾을 수 있는 커맨드 문서 추가
+- **설치 보안 개선**: `install.sh` 키 입력을 숨김 처리하고, 키를 `claude mcp add -e` argv로 넘기지 않도록 변경. MCP 등록 후 `auth-setup.js`가 설정 파일에 env를 저장
+- **테스트**: `auth-setup.js`가 설정 파일에는 키를 저장하지만 stdout에는 실제 키 값을 출력하지 않는 회귀 테스트 추가
+
 ## [6.0.2] - 2026-07-02
 
 ### Fixed - review follow-up hardening

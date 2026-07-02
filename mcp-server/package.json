@@ -1,11 +1,13 @@
 {
   "name": "multi-model-mcp",
-  "version": "6.0.2",
+  "version": "6.0.3",
   "type": "module",
   "main": "index.js",
   "scripts": {
     "start": "node index.js",
     "selftest": "node index.js --selftest",
+    "auth:setup": "node auth-setup.js",
+    "auth:status": "node auth-setup.js --status",
     "test": "node --test tests/*.test.js"
   },
   "dependencies": {
