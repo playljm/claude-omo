@@ -9,6 +9,7 @@
 - **`write-guard.js`**: 기존 파일 `Write` 호출을 실제 PreToolUse deny로 차단. `OMO_WRITE_GUARD_MODE=warn`일 때만 legacy advisory 모드 사용
 - **`ulw-detector.js`**: `ulw`/`hardmode` 단순 언급으로 고비용 루프가 켜지지 않도록 명시적 트리거(`ulw:`, `/ulw-loop`, `hardmode:`, `/hard`)만 허용
 - **테스트**: `node --test` 기반 safety 테스트 추가. write-guard 차단, ULW/HARD 오탐 방지, quick 라우팅 selftest 검증
+- **배포 안전장치**: `/update-omo`, `update.bat`, GitHub Actions에 `npm test`/`selftest`/`npm audit` 게이트 추가
 
 ## [6.0.0] - 2026-07-02
 

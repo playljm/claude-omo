@@ -299,7 +299,7 @@ d = json.load(open('$HOME/.codex/auth.json'))
 t = d.get('tokens', d)
 print('access_token:', '✅' if t.get('access_token') else '❌ 없음')
 print('refresh_token:', '✅' if t.get('refresh_token') else '❌ 없음 (만료 시 재로그인 필요)')
-" 2>/dev/null || echo "❌ auth.json 없음 → GPT 사용 불가"
+" 2>/dev/null || echo "auth.json 없음 — OPENAI_API_KEY 또는 codex CLI 경로 사용"
 
 echo ""
 echo "[Hooks]"
@@ -371,6 +371,6 @@ ChatGPT OAuth를 계속 쓰려면 `providers.json`에서 명시적으로 opt-in:
 - [ ] `npm install -g @anthropic-ai/claude-code`
 - [ ] `git clone https://github.com/playljm/claude-omo`
 - [ ] `bash claude-omo/install.sh` (GLM_API_KEY, OPENAI_API_KEY 입력)
-- [ ] `~/.codex/auth.json` 다른 머신에서 복사 (OPENAI_API_KEY 없을 때)
+- [ ] `codex login` 서버 직접 실행 또는, 불가피한 경우 전용 사용자 계정으로 `~/.codex/auth.json` 복사 후 `chmod 600`
 - [ ] Claude Code 재시작
 - [ ] `/compare 안녕?` 으로 2모델 동작 확인

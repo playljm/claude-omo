@@ -48,9 +48,45 @@ if errorlevel 1 (
     echo   CLAUDE.md 변경 없음
 )
 
-REM ── 3. Git 커밋 & Push ────────────────────────────────────────
+REM ── 3. 검증 ─────────────────────────────────────────────────────
 echo.
-echo [3/3] GitHub push...
+echo [3/4] 검증...
+if exist "%REPO_DIR%\mcp-server\package.json" (
+    pushd "%REPO_DIR%\mcp-server"
+    call npm ci
+    if errorlevel 1 (
+        popd
+        echo [오류] npm ci 실패
+        pause
+        exit /b 1
+    )
+    call npm test
+    if errorlevel 1 (
+        popd
+        echo [오류] npm test 실패
+        pause
+        exit /b 1
+    )
+    call npm run selftest
+    if errorlevel 1 (
+        popd
+        echo [오류] selftest 실패
+        pause
+        exit /b 1
+    )
+    call npm audit --omit=dev
+    if errorlevel 1 (
+        popd
+        echo [오류] npm audit 실패
+        pause
+        exit /b 1
+    )
+    popd
+)
+
+REM ── 4. Git 커밋 & Push ────────────────────────────────────────
+echo.
+echo [4/4] GitHub push...
 cd /d "%REPO_DIR%"
 git add -A
 
@@ -94,7 +130,7 @@ if errorlevel 1 (
 
 echo.
 echo ========================================================
-echo   done  - sync + push 완료!
+echo   done  - 검증 + sync + push 완료!
 echo   (MCP 서버 변경 시 Claude Code 재시작 필요)
 echo ========================================================
 timeout /t 3

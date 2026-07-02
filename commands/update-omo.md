@@ -63,7 +63,23 @@ if ! diff -q "$REPO/CLAUDE.md" "$GLOBAL/CLAUDE.md" >/dev/null 2>&1; then
 fi
 ```
 
-### Step 4 — Git 커밋 & Push
+### Step 4 — 검증
+
+```bash
+if [ -f "$REPO/mcp-server/package.json" ]; then
+  (
+    cd "$REPO/mcp-server"
+    npm ci
+    npm test
+    npm run selftest
+    npm audit --omit=dev
+  )
+fi
+```
+
+검증 실패 시 커밋·push 금지.
+
+### Step 5 — Git 커밋 & Push
 
 ```bash
 cd "$REPO"
@@ -78,7 +94,7 @@ if ! git diff --cached --quiet; then
 fi
 ```
 
-### Step 5 — 완료 보고
+### Step 6 — 완료 보고
 
 변경된 파일 목록, 커밋 해시, 동기화된 파일 수를 요약합니다.
 
