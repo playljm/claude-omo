@@ -28,6 +28,7 @@ const content =
   input?.content ??
   input?.tool_input?.content ??
   input?.tool_input?.new_content ??
+  input?.tool_input?.new_string ??
   "";
 if (!content || typeof content !== "string") process.exit(0);
 

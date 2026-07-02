@@ -3,7 +3,8 @@
  * Agent Banner Hook — PreToolUse (matcher: "Task")
  *
  * Task 도구 호출 시 subagent_type에 따라 에이전트 배너를 터미널에 표시한다.
- * CONOUT$ 직접 쓰기로 Claude Code의 stdio 파이핑을 우회한다.
+ * Windows에서는 CONOUT$ 직접 쓰기로 Claude Code의 stdio 파이핑을 우회하고,
+ * 그 외 플랫폼(macOS/Linux)에서는 stderr로 출력한다.
  */
 
 const chunks = [];
@@ -57,12 +58,16 @@ const banner =
   `${c}║${RST}  ${agent.icon} ${c}${agent.label}${RST}  ${DIM}— ${agent.sub}${RST}${" ".repeat(Math.max(0, 22 - agent.label.length - agent.sub.length))}${c}║${RST}\n` +
   `${c}╚══════════════════════════════════════╝${RST}${descLine}\n`;
 
-// ── CONOUT$ 직접 쓰기 (파이프 우회) ──────────────────────────────
+// ── 배너 출력 (Windows만 CONOUT$ 직접 쓰기로 파이프 우회, 그 외는 stderr) ──
 try {
-  const { openSync, writeSync, closeSync } = await import("fs");
-  const fd = openSync("\\\\.\\CONOUT$", "a");
-  writeSync(fd, banner);
-  closeSync(fd);
+  if (process.platform === "win32") {
+    const { openSync, writeSync, closeSync } = await import("fs");
+    const fd = openSync("\\\\.\\CONOUT$", "a");
+    writeSync(fd, banner);
+    closeSync(fd);
+  } else {
+    process.stderr.write(banner);
+  }
 } catch {
   process.stderr.write(banner);
 }

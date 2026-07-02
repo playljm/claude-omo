@@ -8,9 +8,8 @@ Linux(Ubuntu / Rocky) 서버에서 반복적으로 발생하는 문제와 해결
 
 | 에러 메시지 | 원인 | 해결법 |
 |------------|------|--------|
-| `GLM_API_KEY 환경변수 없음` | .bashrc가 MCP에 전달 안 됨 | [→ GLM 환경변수 주입](#1-glm--gemini-환경변수-없음) |
-| `GEMINI_API_KEY 환경변수 없음` | 동일 | [→ GLM 환경변수 주입](#1-glm--gemini-환경변수-없음) |
-| `insufficient balance` | 위와 동일 (잔액이 아님) | [→ GLM 환경변수 주입](#1-glm--gemini-환경변수-없음) |
+| `GLM_API_KEY 환경변수 없음` | .bashrc가 MCP에 전달 안 됨 | [→ GLM 환경변수 주입](#1-glm-환경변수-없음) |
+| `insufficient balance` | 위와 동일 (잔액이 아님) | [→ GLM 환경변수 주입](#1-glm-환경변수-없음) |
 | `~/.codex/auth.json 파일이 없습니다` | codex login 미실행 | [→ GPT auth.json 복사](#2-gpt-authon-없음) |
 | `access_token이 없습니다` | auth.json 구조 불완전 | [→ auth.json 구조 확인](#3-gpt-토큰-구조-불완전) |
 | `토큰이 만료되었고 refresh_token이 없습니다` | 오래된 auth.json | [→ auth.json 재복사](#4-gpt-토큰-만료) |
@@ -27,7 +26,6 @@ Linux(Ubuntu / Rocky) 서버에서 반복적으로 발생하는 문제와 해결
 | 모델 | 모델명 | 인증 방식 | 필요한 것 |
 |------|--------|-----------|-----------|
 | **GPT** | `gpt-5.3-codex` | OAuth JWT | `~/.codex/auth.json` |
-| **Gemini** | `gemini-2.5-pro` | API Key | `GEMINI_API_KEY` in settings.json env |
 | **GLM** | `glm-5` | API Key | `GLM_API_KEY` in settings.json env |
 
 > **핵심**: Linux에서 `.bashrc` export는 MCP 서버에 **전달되지 않음**.
@@ -35,12 +33,11 @@ Linux(Ubuntu / Rocky) 서버에서 반복적으로 발생하는 문제와 해결
 
 ---
 
-## 1. GLM / Gemini — 환경변수 없음
+## 1. GLM — 환경변수 없음
 
 ### 증상
 ```
 GLM_API_KEY 환경변수 없음.
-GEMINI_API_KEY 환경변수 없음.
 insufficient balance   ← Z.ai가 키 없을 때 이 메시지를 반환하기도 함
 ```
 
@@ -68,7 +65,6 @@ cat ~/.claude/settings.json
       "command": "node",
       "args": ["/root/mcp-servers/multi-model/index.js"],
       "env": {
-        "GEMINI_API_KEY": "실제키값",
         "GLM_API_KEY": "실제키값"
       }
     }
@@ -81,7 +77,7 @@ cat ~/.claude/settings.json
 # Claude Code 재시작 후 테스트
 # Claude Code 세션에서:
 # /compare 안녕?
-# → GLM, Gemini 모두 응답하면 성공
+# → GLM 응답하면 성공
 ```
 
 ---
@@ -231,7 +227,6 @@ claude mcp remove multi-model-agent 2>/dev/null || true
 
 # 재등록 (API 키는 실제 값으로 교체)
 claude mcp add --scope user \
-  -e "GEMINI_API_KEY=실제키" \
   -e "GLM_API_KEY=실제키" \
   multi-model-agent -- "$NODE_BIN" "$MCP_DIR/index.js"
 
@@ -302,7 +297,6 @@ python3 -c "
 import json
 s = json.load(open('$HOME/.claude/settings.json'))
 env = s.get('mcpServers', {}).get('multi-model-agent', {}).get('env', {})
-print('GEMINI_API_KEY:', '✅' if env.get('GEMINI_API_KEY') else '❌ 없음')
 print('GLM_API_KEY:', '✅' if env.get('GLM_API_KEY') else '❌ 없음')
 " 2>/dev/null || echo "❌ settings.json 파싱 실패"
 
@@ -402,7 +396,7 @@ bash ~/claude-omo/install.sh   # OPENAI_API_KEY 프롬프트에서 입력
 - [ ] Node.js 18+ 설치
 - [ ] `npm install -g @anthropic-ai/claude-code`
 - [ ] `git clone https://github.com/playljm/claude-omo`
-- [ ] `bash claude-omo/install.sh` (GEMINI_API_KEY, GLM_API_KEY, OPENAI_API_KEY 입력)
+- [ ] `bash claude-omo/install.sh` (GLM_API_KEY, OPENAI_API_KEY 입력)
 - [ ] `~/.codex/auth.json` 다른 머신에서 복사 (OPENAI_API_KEY 없을 때)
 - [ ] Claude Code 재시작
-- [ ] `/compare 안녕?` 으로 3모델 동작 확인
+- [ ] `/compare 안녕?` 으로 2모델 동작 확인

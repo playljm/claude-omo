@@ -1,5 +1,44 @@
 # Changelog
 
+## [6.0.0] - 2026-07-02
+
+### Added - providers.json 플러그인 아키텍처 + HARD 모드
+
+#### mcp-server 플러그인화
+- **`providers.json`** (신규): 프로바이더 정의(gpt/glm) + `routing` 테이블 + `parallel_default`를 코드와 분리 관리. `kind: "openai-responses" | "openai-chat" | "cli"` 3종을 지원해, 새 프로바이더를 등록하면 코드 수정 없이 `ask_<name>` 툴이 생성됨
+- **`buildToolDefinitions()`**: enabled 프로바이더마다 `ask_<name>` 동적 생성 (model enum, `supports_reasoning_effort`/`supports_temperature` 플래그로 파라미터 조건부 추가). 기존 `ask_gpt`/`ask_glm` 이름·파라미터는 하위 호환 유지
+- **`loadProviders()`**: providers.json 파일 없음/파싱 실패/`schema_version` 불일치 시 stderr 경고 후 내장 `DEFAULT_PROVIDERS_CONFIG`로 폴백 — MCP 서버가 죽지 않음
+- **`--selftest`** 플래그: `@modelcontextprotocol/sdk` 정적 임포트 없이(모든 sdk 임포트를 `main()` 내부 동적 import로 이동) providers.json 로드 결과(enabled 목록, 프로바이더별 인증 상태, 생성될 툴 이름, routing 테이블)를 JSON으로 출력 후 종료 — `node_modules` 없이도 동작 확인 가능
+
+#### HARD 모드
+- **`commands/hard.md`** (신규): `/hard <작업>` 커맨드 — 토큰 절약 정책의 명시적 예외. 5단계 프로토콜(①ultrathink 정합성/설계/리스크 3관점 분해+TodoWrite 강제 ②최대 병렬화+서브에이전트 모델 제한 해제 ③`smart_route(ultrabrain, xhigh)`+`oracle` 이중 자문+`ask_parallel` 교차검증 ④`reviewer`+`momus` 8/10 미만 재작업 ⑤Ralph 루프와 동일한 완료 보장)
+- **`ulw-detector.js`**: `hardmode`/`하드모드` 키워드 정규식 추가 — 감지 시 HARD 모드 프로토콜을 additionalContext로 주입 + 배너 출력. ULW와 동시 매치 시 HARD 우선
+
+#### install.sh
+- 누락된 훅 2종 등록: `routing-display.js`(PostToolUse, matcher `mcp__multi-model-agent`), `agent-banner.js`(PreToolUse, matcher `Task`) — `upsert_matcher_hook`으로 idempotent 등록
+- CLAUDE.md `<!-- OMO:START/END -->` 마커 기반 병합 — 마커가 있으면 그 블록만 레포 버전으로 교체, 없으면 기존 내용 보존+append. 인터랙티브 y/N 덮어쓰기 프롬프트 폐지(항상 백업 후 병합)
+- `PROTECTED_COMMANDS=("finish.md")` 배열 도입 — 로컬에 이미 존재하고 레포 버전과 내용이 다른 보호 대상 커맨드는 복사 스킵 + 안내 출력
+- macOS에서 `providers.json`을 백업→복사→복원 방식으로 보존(신규 설치 시엔 레포 기본값 설치), 완료 배너의 슬래시 커맨드 목록을 `commands/*.md` frontmatter에서 동적 생성
+
+### Changed - 인증 체인 ToS 준수 + 라우팅 동적화
+
+- **GPT 인증 체인**(`resolveGptAuth()`): `auth_priority`(`api_key` → `codex_cli` → `chatgpt_oauth`) 순서로 자동 시도. `codex_cli`는 `codex --version` 1회 캐시 확인 후 `codex exec` 서브프로세스 실행. `chatgpt_oauth`는 `allow_chatgpt_oauth: true`일 때만, 최초 1회 stderr ToS 경고 출력 후 사용 — 3가지 모두 실패 시 대안을 안내하는 에러 발생
+- **버전 관리 단일화**: mcp-server 버전을 `package.json`에서 `readFileSync`로 읽어 사용 (하드코딩 제거), `package.json` 버전을 `6.0.0`으로 갱신
+- **`ask_parallel`**: `parallel_default` ∩ enabled 프로바이더로 호출 대상 결정, `models` 파라미터 enum도 enabled 프로바이더 기준으로 동적 생성
+- **`smart_route`**: `CATEGORY_ROUTING`이 providers.json의 `routing` 테이블을 사용하도록 변경 — primary 프로바이더가 disabled면 fallback 체인에서 첫 enabled로 자동 대체(`(xxx disabled)` 표기), 전부 disabled면 명확한 에러
+- **`last-call.json`** 메타 기록 일반화: 하드코딩된 모델명 매핑 제거, `providers.providers[name]?.default_model`로 대체
+
+### Fixed - macOS 버그 2건 + 레이스/오탐 4건
+
+- **CONOUT$ 쓰레기파일** (`ulw-detector.js`, `hooks/agent-banner.js`): `process.platform === "win32"`일 때만 `\\.\CONOUT$` 오픈을 시도하도록 변경 — macOS/Linux는 바로 stderr로 출력해 홈 디렉터리에 `\\.\CONOUT$` 파일이 생기던 문제 해소
+- **install.sh macOS timeout 즉사**: `find_python()`에서 `timeout`/`gtimeout` 존재 여부를 먼저 확인하고, 둘 다 없으면 래핑 없이 python을 직접 실행 — macOS에서 python3 탐지가 항상 실패하던 문제 수정
+- **재설치 시 API 키 유실**: `~/.claude.json`(`claude mcp add --scope user` 정식 등록 경로)을 우선 확인하고 없으면 `~/.claude/settings.json`으로 폴백하도록 `GLM_API_KEY`/`OPENAI_API_KEY` 복원 로직 재작성
+- **`comment-checker.js` Edit no-op**: 본문 추출 폴백 체인에 `tool_input.new_string`이 누락되어 Edit 도구 호출 시 항상 빈 문자열로 처리되던 문제 수정
+- **ULW 정규식 오탐**: `/(^|[^-\w])(ulw|ultrawork)(?=[^-\w]|$)/i`로 교체 — `ulw-detector.js` 같은 파일명이 ULW 모드로 오인식되던 문제 해소
+- **공유 상태파일 레이스** (`pre-call-indicator.js` + `post-call-logger.js`): `pre-call-state.json`을 단일 오브젝트에서 `{tool:hash}` 키 맵으로 변경해 동시 MCP 호출 간 상태 덮어쓰기/유실 완화, 60초 경과 엔트리 자동 정리
+
+---
+
 ## [5.3.2] - 2026-02-25
 
 ### Fixed - 성능 개선 및 시각적 출력 품질 향상

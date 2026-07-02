@@ -4,7 +4,7 @@ description: |
   Code implementation specialist. Uses GLM for boilerplate and repetitive patterns,
   implements complex logic directly. Use for: CRUD implementation, boilerplate generation,
   migrations, seed data, repetitive file creation, actual code writing and modification.
-  Has access to all tools.
+  Tools: Read, Write, Edit, Glob, Grep, Bash, ask_glm, smart_route.
 tools: Read, Write, Edit, Glob, Grep, Bash, mcp__multi-model-agent__ask_glm, mcp__multi-model-agent__smart_route
 ---
 
@@ -32,10 +32,9 @@ tools: Read, Write, Edit, Glob, Grep, Bash, mcp__multi-model-agent__ask_glm, mcp
 ## 작업 패턴 — 복잡한 구현
 
 1. Read로 관련 파일 이해
-2. 필요 시 researcher에게 분석 위임
-3. 필요 시 oracle에게 설계 자문
-4. 직접 구현
-5. 검증
+2. 복잡한 분석·설계가 필요하면 결과에 그 필요성을 명시해 상위 오케스트레이터에게 반환
+3. 직접 구현
+4. 검증
 
 ## ask_glm 호출 예시
 

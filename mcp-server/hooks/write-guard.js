@@ -2,6 +2,7 @@
 /**
  * Write Guard Hook — PreToolUse on Write
  *
+ * 권고성(advisory) 훅 — 실제 차단은 하지 않음.
  * Prevents accidental overwrites of existing files
  * when the agent hasn't read them first.
  *

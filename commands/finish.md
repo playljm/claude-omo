@@ -1,11 +1,5 @@
 ---
-name: finish
-description: 작업 마무리 체크리스트. 변경사항 요약, 문서 업데이트, 커밋/푸시까지 안내.
-user-invocable: true
-metadata:
-  version: "2.1.0"
-  category: "workflow"
-  updated: "2026-02-23"
+description: 작업 마무리 체크리스트. 변경사항 요약, 문서 업데이트, 커밋/푸시까지 안내. Usage: /finish
 ---
 
 # 작업 마무리
@@ -30,7 +24,7 @@ metadata:
 **핵심 변경사항:**
 - (주요 변경 내용)
 
-## 4. 문서 업데이트
+## 3. 문서 업데이트
 
 필요한 경우에만 업데이트:
 - **README.md**: 사용법, 설치 방법 변경 시
@@ -42,7 +36,7 @@ metadata:
 - 데이터 비율: pie chart
 - DB 구조: erDiagram
 
-## 5. Git 커밋 및 푸시
+## 4. Git 커밋 및 푸시
 
 커밋 메시지 컨벤션:
 - feat: 새 기능
@@ -55,7 +49,7 @@ metadata:
 
 feature 브랜치라면 master에 머지 후 push (GitHub 잔디 반영)
 
-## 6. 결과 요약
+## 5. 결과 요약
 
 커밋/푸시 완료 후 아래 형식으로 간결하게 요약합니다:
 

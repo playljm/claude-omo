@@ -1,26 +1,27 @@
 #!/usr/bin/env node
 /**
- * Multi-Model MCP Server v5.3
+ * Multi-Model MCP Server v6.0
  *
- * 연결 모델:
- *   - GPT-5.3-Codex : ChatGPT OAuth (~/.codex/auth.json) → Responses API /v1/responses
- *   - GLM-5         : Z.ai API Key → OpenAI 호환 엔드포인트
+ * providers.json 기반 플러그인 아키텍처
+ *   - providers.json에 프로바이더를 추가/제거하면 코드 수정 없이 ask_<name> 툴이 생성된다.
+ *   - kind: "openai-responses" | "openai-chat" | "cli" 3종을 지원.
  *
- * v5.3 신규:
- *   - pre-call-indicator: MCP 호출 즉시 ⏳ 표시
- *   - post-call-logger  : 완료 요약 + activity.log JSONL 기록
+ * 기본 프로바이더:
+ *   - GPT (openai-responses) : 인증 체인 api_key → codex_cli → chatgpt_oauth (ToS 준수 우선순위)
+ *   - GLM (openai-chat)      : Z.ai API Key → OpenAI 호환 엔드포인트
+ *
+ * --selftest 플래그: @modelcontextprotocol/sdk 임포트 없이 providers.json 로드 결과만 점검하고 종료.
+ * (sdk 임포트는 main() 안에서 동적으로 수행 — node_modules 없이도 --selftest 동작)
  */
 
-import { Server } from "@modelcontextprotocol/sdk/server/index.js";
-import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
-import {
-  CallToolRequestSchema,
-  ListToolsRequestSchema,
-} from "@modelcontextprotocol/sdk/types.js";
 import { readFileSync, writeFileSync, existsSync, appendFileSync } from "fs";
 import { writeFile } from "fs/promises";
+import { execFile } from "child_process";
 import { homedir } from "os";
-import { join } from "path";
+import { join, dirname } from "path";
+import { fileURLToPath } from "url";
+
+const SELF_DIR = dirname(fileURLToPath(import.meta.url));
 
 // ───────────────────────────────────────────────
 // 토큰 사용량 로깅
@@ -34,7 +35,7 @@ function logUsage(model, inputTokens, outputTokens, extra = {}) {
     input_tokens: inputTokens,
     output_tokens: outputTokens,
     total_tokens: inputTokens + outputTokens,
-    ...extra, // category, retry_count, routing, reasoning_effort 등
+    ...extra, // category, retry_count, routing, reasoning_effort, kind 등
   };
   try {
     appendFileSync(USAGE_LOG_PATH, JSON.stringify(entry) + "\n");
@@ -164,14 +165,95 @@ async function fetchWithRetry(url, options, maxRetries = 3, timeoutMs = DEFAULT_
 }
 
 // ───────────────────────────────────────────────
-// GPT OAuth 토큰 관리
+// providers.json 로드 — 실패 시 내장 기본값으로 폴백
+// ───────────────────────────────────────────────
+const DEFAULT_PROVIDERS_CONFIG = {
+  schema_version: 1,
+  providers: {
+    gpt: {
+      enabled: true,
+      label: "GPT",
+      kind: "openai-responses",
+      base_url: "https://api.openai.com/v1",
+      auth: {
+        api_key_env: "OPENAI_API_KEY",
+        auth_priority: ["api_key", "codex_cli", "chatgpt_oauth"],
+        allow_chatgpt_oauth: false,
+      },
+      default_model: "gpt-5.3-codex",
+      models: ["gpt-5.3-codex", "gpt-5.2-codex", "gpt-5.1-codex-max"],
+      supports_reasoning_effort: true,
+      description: "복잡한 코드리뷰, 알고리즘, 아키텍처",
+    },
+    glm: {
+      enabled: true,
+      label: "GLM",
+      kind: "openai-chat",
+      base_url: "https://api.z.ai/api/paas/v4",
+      auth: { api_key_env: "GLM_API_KEY" },
+      default_model: "glm-5",
+      models: ["glm-5"],
+      max_tokens_default: 4096,
+      supports_temperature: true,
+      description: "보일러플레이트, 볼륨 작업 — 비용 효율 최우선",
+    },
+  },
+  routing: {
+    ultrabrain: { provider: "gpt", effort: "xhigh", fallback: ["glm"] },
+    deep:       { provider: "gpt", effort: "high",  fallback: ["glm"] },
+    visual:     { provider: "gpt", effort: "high",  fallback: ["glm"] },
+    research:   { provider: "gpt", effort: "high",  fallback: ["glm"] },
+    bulk:       { provider: "glm", fallback: ["gpt"], fallback_effort: "medium" },
+    writing:    { provider: "glm", fallback: ["gpt"], fallback_effort: "medium" },
+    quick:      { provider: "gpt", effort: "none", fallback: ["glm"] },
+  },
+  parallel_default: ["gpt", "glm"],
+};
+
+function loadProviders() {
+  const providersPath = join(SELF_DIR, "providers.json");
+  let parsed;
+  try {
+    const raw = readFileSync(providersPath, "utf8");
+    parsed = JSON.parse(raw);
+  } catch (err) {
+    process.stderr.write(
+      `[경고] providers.json 로드 실패(${err.message}) — 내장 기본값으로 폴백합니다.\n`
+    );
+    return DEFAULT_PROVIDERS_CONFIG;
+  }
+
+  if (parsed.schema_version !== 1) {
+    process.stderr.write(
+      `[경고] providers.json schema_version(${parsed.schema_version})이 지원 범위(1) 밖입니다 — 내장 기본값으로 폴백합니다.\n`
+    );
+    return DEFAULT_PROVIDERS_CONFIG;
+  }
+
+  return parsed;
+}
+
+function getEnabledProviderNames(providers) {
+  return Object.entries(providers.providers ?? {})
+    .filter(([, cfg]) => cfg.enabled)
+    .map(([name]) => name);
+}
+
+function isLocalBaseUrl(baseUrl) {
+  if (!baseUrl) return false;
+  return /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:|\/|$)/i.test(baseUrl);
+}
+
+// ───────────────────────────────────────────────
+// GPT 인증 체인 — api_key → codex_cli → chatgpt_oauth (ToS 준수 우선순위)
 // auth.json 구조: { tokens: { access_token, refresh_token }, OPENAI_API_KEY, last_refresh }
-// 우선순위: 1) OPENAI_API_KEY 환경변수  2) auth.json의 OPENAI_API_KEY  3) ChatGPT OAuth
 // ───────────────────────────────────────────────
 const CODEX_AUTH_PATH = join(homedir(), ".codex", "auth.json");
 const TOKEN_REFRESH_URL = "https://auth.openai.com/oauth/token";
 
 let refreshPromise = null;
+let chatgptOauthWarned = false;
+let codexAvailableCache = null;
 
 function readAuthJson() {
   if (!existsSync(CODEX_AUTH_PATH)) return null;
@@ -217,26 +299,30 @@ async function doRefreshToken(refreshToken, clientId) {
   return await res.json();
 }
 
-async function getValidAccessToken() {
-  // ── 1순위: OPENAI_API_KEY 환경변수 ──────────────────────────
-  if (process.env.OPENAI_API_KEY) {
-    return process.env.OPENAI_API_KEY;
-  }
-
-  // ── 2순위: auth.json의 OPENAI_API_KEY ───────────────────────
+// api_key_env 환경변수 → auth.json 동일 필드 순으로 조회 (없으면 null)
+function getApiKeyForProvider(authCfg) {
+  const envName = authCfg?.api_key_env;
+  if (!envName) return null;
+  if (process.env[envName]) return process.env[envName];
   const auth = readAuthJson();
-  if (auth?.OPENAI_API_KEY) {
-    return auth.OPENAI_API_KEY;
-  }
+  if (auth?.[envName]) return auth[envName];
+  return null;
+}
 
-  // ── 3순위: ChatGPT OAuth access_token ───────────────────────
+// codex CLI 실행 가능 여부 — execFile로 1회만 확인 후 캐시
+async function checkCodexAvailable() {
+  if (codexAvailableCache !== null) return codexAvailableCache;
+  codexAvailableCache = await new Promise((resolve) => {
+    execFile("codex", ["--version"], { timeout: 5000 }, (err) => resolve(!err));
+  });
+  return codexAvailableCache;
+}
+
+// ChatGPT OAuth 토큰 획득/갱신 (auth_priority의 chatgpt_oauth 단계에서만 호출)
+async function getValidChatGptOauthToken() {
+  const auth = readAuthJson();
   if (!auth) {
-    throw new Error(
-      "GPT 인증 없음. 다음 중 하나를 설정하세요:\n" +
-      "  방법 1) OPENAI_API_KEY 환경변수 설정 (platform.openai.com에서 발급)\n" +
-      "  방법 2) ~/.codex/auth.json의 OPENAI_API_KEY 필드에 sk-... 키 입력\n" +
-      "  방법 3) codex login 으로 ChatGPT OAuth 인증 (api.responses.write 스코프 필요)"
-    );
+    throw new Error("auth.json이 없습니다. `codex login`으로 ChatGPT OAuth 인증을 진행하세요.");
   }
 
   const tokens = auth.tokens ?? auth;
@@ -254,10 +340,7 @@ async function getValidAccessToken() {
   if (!scopes.includes("api.responses.write")) {
     throw new Error(
       `auth.json ChatGPT 토큰에 api.responses.write 스코프가 없습니다.\n` +
-      `OPENAI_API_KEY(sk-...) 설정을 권장합니다:\n` +
-      `  install.sh 재실행 시 OPENAI_API_KEY 입력\n` +
-      `  또는: claude mcp add --scope user multi-model-agent -e OPENAI_API_KEY=sk-... ...\n` +
-      `${SCOPE_RE_LOGIN_MSG}`
+      `OPENAI_API_KEY(sk-...) 설정을 권장합니다.\n${SCOPE_RE_LOGIN_MSG}`
     );
   }
 
@@ -265,9 +348,7 @@ async function getValidAccessToken() {
   if (!isExpired) return accessToken;
 
   if (!refreshToken) {
-    throw new Error(
-      "토큰이 만료되었고 refresh_token이 없습니다. `codex login`으로 재인증하세요."
-    );
+    throw new Error("토큰이 만료되었고 refresh_token이 없습니다. `codex login`으로 재인증하세요.");
   }
 
   if (!refreshPromise) {
@@ -285,9 +366,7 @@ async function getValidAccessToken() {
         };
         writeFileSync(CODEX_AUTH_PATH, JSON.stringify(newAuth, null, 2));
         if (!newScopes.includes("api.responses.write")) {
-          throw new Error(
-            `토큰 갱신 후 api.responses.write 스코프 소실.\n${SCOPE_RE_LOGIN_MSG}`
-          );
+          throw new Error(`토큰 갱신 후 api.responses.write 스코프 소실.\n${SCOPE_RE_LOGIN_MSG}`);
         }
         return refreshed.access_token;
       })
@@ -301,32 +380,114 @@ async function getValidAccessToken() {
   }
 }
 
+// auth_priority를 순서대로 시도해 실제 호출 방식을 결정
+async function resolveGptAuth(provider) {
+  const authCfg = provider.auth ?? {};
+  const priority = authCfg.auth_priority?.length ? authCfg.auth_priority : ["api_key"];
+
+  for (const method of priority) {
+    if (method === "api_key") {
+      const key = getApiKeyForProvider(authCfg);
+      if (key) return { method: "api_key", token: key };
+    } else if (method === "codex_cli") {
+      if (await checkCodexAvailable()) return { method: "codex_cli" };
+    } else if (method === "chatgpt_oauth") {
+      if (authCfg.allow_chatgpt_oauth) {
+        if (!chatgptOauthWarned) {
+          process.stderr.write(
+            "[ToS 주의] ChatGPT OAuth 토큰의 API 직접 호출은 OpenAI 이용약관 위반 소지가 있습니다. " +
+            "OPENAI_API_KEY 또는 codex CLI 사용을 권장합니다.\n"
+          );
+          chatgptOauthWarned = true;
+        }
+        const token = await getValidChatGptOauthToken();
+        return { method: "chatgpt_oauth", token };
+      }
+    }
+  }
+
+  throw new Error(
+    `${provider.label} 인증 실패. 다음 중 하나를 설정하세요:\n` +
+    `  방법 1) ${authCfg.api_key_env ?? "API_KEY"} 환경변수 설정 (정식 API 키 — 권장)\n` +
+    `  방법 2) codex CLI 설치 후 \`codex login\` (PATH에 codex 필요 — 공식 클라이언트 경유)\n` +
+    `  방법 3) providers.json의 auth.allow_chatgpt_oauth를 true로 설정 후 \`codex login\`\n` +
+    `         (ChatGPT OAuth 토큰 직접 호출은 OpenAI 이용약관 위반 소지가 있어 기본 비활성화)`
+  );
+}
+
 // ───────────────────────────────────────────────
-// callGpt — Responses API
+// CLI 프로바이더 실행 — 공식 CLI 서브프로세스 (execFile, shell 금지)
 // ───────────────────────────────────────────────
-async function callGpt(
-  prompt,
-  model = "gpt-5.3-codex",
-  systemPrompt = null,
-  reasoningEffort = "medium",
-  maxTokens = null,
-  logExtra = {}
-) {
-  const token = await getValidAccessToken();
+const CLI_TIMEOUT_MS = 300_000;
+const CLI_MAX_BUFFER = 10 * 1024 * 1024;
+const CODEX_CLI_COMMAND = ["codex", "exec", "--model", "{model}", "{prompt}"];
+
+async function execCli(commandTemplate, { model, prompt, promptVia = "arg" }) {
+  const [cmd, ...restTemplate] = commandTemplate;
+  let args;
+  let stdinInput = null;
+
+  if (promptVia === "stdin") {
+    args = restTemplate
+      .filter((part) => part !== "{prompt}")
+      .map((part) => part.replace(/\{model\}/g, model ?? ""));
+    stdinInput = prompt ?? "";
+  } else {
+    args = restTemplate.map((part) =>
+      part.replace(/\{model\}/g, model ?? "").replace(/\{prompt\}/g, prompt ?? "")
+    );
+  }
+
+  return new Promise((resolve, reject) => {
+    const child = execFile(
+      cmd,
+      args,
+      { timeout: CLI_TIMEOUT_MS, maxBuffer: CLI_MAX_BUFFER },
+      (err, stdout, stderr) => {
+        if (err) {
+          reject(new Error(`CLI 실행 실패 (${cmd}): ${err.message}${stderr ? `\n${stderr}` : ""}`));
+          return;
+        }
+        resolve(stdout);
+      }
+    );
+    if (stdinInput !== null) {
+      child.stdin.write(stdinInput);
+      child.stdin.end();
+    }
+  });
+}
+
+// ───────────────────────────────────────────────
+// callOpenAiResponses — kind: "openai-responses" (GPT, Responses API)
+// ───────────────────────────────────────────────
+async function callOpenAiResponses(provider, { prompt, model, systemPrompt, reasoningEffort = "medium", maxTokens, logExtra = {} }) {
+  const auth = await resolveGptAuth(provider);
+  const resolvedModel = model || provider.default_model;
+
+  // codex CLI 경유 — 공식 클라이언트를 통한 실행이므로 별도 서브프로세스로 위임
+  if (auth.method === "codex_cli") {
+    const fullPrompt = systemPrompt ? `${systemPrompt}\n\n${prompt}` : prompt;
+    const stdout = await execCli(CODEX_CLI_COMMAND, { model: resolvedModel, prompt: fullPrompt, promptVia: "arg" });
+    logUsage(resolvedModel, 0, 0, { kind: "cli", auth_method: "codex_cli", ...logExtra });
+    return stdout.trim();
+  }
 
   const input = [];
   if (systemPrompt) input.push({ role: "system", content: systemPrompt });
   input.push({ role: "user", content: prompt });
 
-  const body = { model, input };
-  if (reasoningEffort !== "none") body.reasoning = { effort: reasoningEffort };
+  const body = { model: resolvedModel, input };
+  if (provider.supports_reasoning_effort && reasoningEffort !== "none") {
+    body.reasoning = { effort: reasoningEffort };
+  }
   if (maxTokens) body.max_output_tokens = maxTokens;
 
   const timeoutMs = EFFORT_TIMEOUT[reasoningEffort] ?? DEFAULT_TIMEOUT;
-  const { res, retryCount } = await fetchWithRetry("https://api.openai.com/v1/responses", {
+  const { res, retryCount } = await fetchWithRetry(`${provider.base_url}/responses`, {
     method: "POST",
     headers: {
-      Authorization: `Bearer ${token}`,
+      Authorization: `Bearer ${auth.token}`,
       "Content-Type": "application/json",
     },
     body: JSON.stringify(body),
@@ -334,15 +495,16 @@ async function callGpt(
 
   if (!res.ok) {
     const err = await res.text();
-    throw new Error(`GPT API 오류 (HTTP ${res.status}): ${err}`);
+    throw new Error(`${provider.label} API 오류 (HTTP ${res.status}): ${err}`);
   }
 
   const data = await res.json();
   const usage = data.usage ?? {};
-  logUsage(model, usage.input_tokens ?? 0, usage.output_tokens ?? 0, {
+  logUsage(resolvedModel, usage.input_tokens ?? 0, usage.output_tokens ?? 0, {
     reasoning_tokens: usage.reasoning_tokens ?? 0,
     reasoning_effort: reasoningEffort,
     retry_count: retryCount,
+    auth_method: auth.method,
     ...logExtra,
   });
 
@@ -362,51 +524,53 @@ async function callGpt(
 }
 
 // ───────────────────────────────────────────────
-// callGlm — OpenAI 호환 Chat Completions (Z.ai / bigmodel.cn 유료 플랜)
-// /api/paas/v4 → 표준 유료 API 엔드포인트 (크레딧 차감 방식)
+// callOpenAiChat — kind: "openai-chat" (GLM 및 OpenAI 호환 API 전부: DeepSeek/Groq/OpenRouter/Ollama 등)
+// provider 객체(base_url, auth.api_key_env, models 등)만 참조 — 신규 프로바이더 추가 시 코드 수정 불필요
 // ───────────────────────────────────────────────
-async function callGlm(
-  prompt,
-  model = "glm-5",
-  systemPrompt = null,
-  maxTokens = null,
-  temperature = null,
-  logExtra = {}
-) {
-  const apiKey = process.env.GLM_API_KEY;
-  if (!apiKey) {
-    throw new Error(
-      "GLM_API_KEY 환경변수 없음. api.z.ai에서 키 발급 후 ~/.bashrc에 추가."
-    );
-  }
+function resolveApiKeyForChat(provider) {
+  const authCfg = provider.auth ?? {};
+  const key = getApiKeyForProvider(authCfg);
+  if (key) return key;
+  if (isLocalBaseUrl(provider.base_url)) return null; // Ollama 등 로컬 엔드포인트는 키 불필요
+  throw new Error(
+    `${provider.label} 인증 실패: ${authCfg.api_key_env ?? "API 키"} 환경변수가 필요합니다.`
+  );
+}
+
+async function callOpenAiChat(provider, { prompt, model, systemPrompt, maxTokens, temperature, logExtra = {} }) {
+  const apiKey = resolveApiKeyForChat(provider);
+  const resolvedModel = model || provider.default_model;
 
   const messages = [];
   if (systemPrompt) messages.push({ role: "system", content: systemPrompt });
   messages.push({ role: "user", content: prompt });
 
-  const body = { model, messages, max_tokens: maxTokens ?? 4096 };
-  if (temperature !== null) body.temperature = temperature;
+  const body = {
+    model: resolvedModel,
+    messages,
+    max_tokens: maxTokens ?? provider.max_tokens_default ?? 4096,
+  };
+  if (provider.supports_temperature && temperature !== null && temperature !== undefined) {
+    body.temperature = temperature;
+  }
 
-  const { res, retryCount } = await fetchWithRetry(
-    "https://api.z.ai/api/paas/v4/chat/completions",
-    {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(body),
-    }
-  );
+  const headers = { "Content-Type": "application/json" };
+  if (apiKey) headers.Authorization = `Bearer ${apiKey}`;
+
+  const { res, retryCount } = await fetchWithRetry(`${provider.base_url}/chat/completions`, {
+    method: "POST",
+    headers,
+    body: JSON.stringify(body),
+  });
 
   if (!res.ok) {
     const err = await res.text();
-    throw new Error(`GLM API 오류 (HTTP ${res.status}): ${err}`);
+    throw new Error(`${provider.label} API 오류 (HTTP ${res.status}): ${err}`);
   }
 
   const data = await res.json();
   const usage = data.usage ?? {};
-  logUsage(model, usage.prompt_tokens ?? 0, usage.completion_tokens ?? 0, {
+  logUsage(resolvedModel, usage.prompt_tokens ?? 0, usage.completion_tokens ?? 0, {
     retry_count: retryCount,
     ...logExtra,
   });
@@ -415,7 +579,41 @@ async function callGlm(
 }
 
 // ───────────────────────────────────────────────
-// smart_route — 카테고리 기반 자동 라우팅
+// callCliProvider — kind: "cli" (공식 CLI 서브프로세스 일반화)
+// provider.command: ["codex", "exec", "--model", "{model}", "{prompt}"] 형태 템플릿
+// ───────────────────────────────────────────────
+async function callCliProvider(provider, { prompt, model, systemPrompt, logExtra = {} }) {
+  const resolvedModel = model || provider.default_model;
+  const fullPrompt = systemPrompt ? `${systemPrompt}\n\n${prompt}` : prompt;
+
+  const stdout = await execCli(provider.command, {
+    model: resolvedModel,
+    prompt: fullPrompt,
+    promptVia: provider.prompt_via ?? "arg",
+  });
+
+  logUsage(resolvedModel, 0, 0, { kind: "cli", ...logExtra });
+  return stdout.trim();
+}
+
+// ───────────────────────────────────────────────
+// callProvider — kind별 디스패치
+// ───────────────────────────────────────────────
+async function callProvider(provider, opts) {
+  switch (provider.kind) {
+    case "openai-responses":
+      return callOpenAiResponses(provider, opts);
+    case "openai-chat":
+      return callOpenAiChat(provider, opts);
+    case "cli":
+      return callCliProvider(provider, opts);
+    default:
+      throw new Error(`알 수 없는 provider kind: ${provider.kind}`);
+  }
+}
+
+// ───────────────────────────────────────────────
+// smart_route — 카테고리 기반 자동 라우팅 (CATEGORY_PATTERNS는 코드 고정, 라우팅 테이블은 providers.json)
 // ───────────────────────────────────────────────
 const CATEGORY_PATTERNS = {
   ultrabrain: /아키텍처.*설계|설계.*아키텍처|system.?design|전체.*전략|전략.*결정|architecture|design.?pattern|comprehensive.*plan|전체.*구조.*파악/i,
@@ -427,18 +625,6 @@ const CATEGORY_PATTERNS = {
   quick: /간단.*변환|변환.*간단|빠르게|포맷.*변환|format.*convert|단순.*변경|단순.*수정/i,
 };
 
-// 카테고리 → 라우팅 설정
-// fallbackEffort: 폴백 모델이 GPT일 때 사용할 reasoning_effort
-const CATEGORY_ROUTING = {
-  ultrabrain: { model: "gpt",  effort: "xhigh", fallback: ["glm"],  fallbackEffort: null },
-  deep:       { model: "gpt",  effort: "high",  fallback: ["glm"],  fallbackEffort: null },
-  visual:     { model: "gpt",  effort: "high",  fallback: ["glm"],  fallbackEffort: null },
-  research:   { model: "gpt",  effort: "high",  fallback: ["glm"],  fallbackEffort: null },
-  bulk:       { model: "glm",  effort: null,     fallback: ["gpt"],  fallbackEffort: "medium" },
-  writing:    { model: "glm",  effort: null,     fallback: ["gpt"],  fallbackEffort: "medium" },
-  quick:      { model: "gpt",  effort: "none",   fallback: ["glm"],  fallbackEffort: null },
-};
-
 function classifyCategory(task) {
   for (const [cat, pattern] of Object.entries(CATEGORY_PATTERNS)) {
     if (pattern.test(task)) return cat;
@@ -446,40 +632,70 @@ function classifyCategory(task) {
   return null; // 분류 불가 → 호출자가 기본값 결정
 }
 
-async function callSmartRoute(task, category = null, context = null, maxTokens = null) {
-  const cat = category ?? classifyCategory(task) ?? "deep";
-  const routing = CATEGORY_ROUTING[cat] ?? CATEGORY_ROUTING.deep;
-  const fullPrompt = context ? `[컨텍스트]\n${context}\n\n[작업]\n${task}` : task;
-  const primaryModel = routing.model;
+function pickFirstEnabled(names, enabledSet) {
+  for (const name of names ?? []) {
+    if (enabledSet.has(name)) return name;
+  }
+  return null;
+}
 
-  async function tryModel(model, effort, logExtra) {
-    switch (model) {
-      case "gpt":
-        return callGpt(fullPrompt, "gpt-5.3-codex", null, effort ?? "medium", maxTokens, logExtra);
-      // gemini removed
-      case "glm":
-        return callGlm(fullPrompt, "glm-5", null, maxTokens, null, logExtra);
-      default:
-        throw new Error(`알 수 없는 모델: ${model}`);
-    }
+async function callSmartRoute(providers, task, category = null, context = null, maxTokens = null) {
+  const enabledNames = getEnabledProviderNames(providers);
+  const enabledSet = new Set(enabledNames);
+  if (enabledSet.size === 0) {
+    throw new Error("smart_route 사용 불가 — enabled 프로바이더가 하나도 없습니다.");
   }
 
-  // Primary 시도
-  try {
-    const result = await tryModel(primaryModel, routing.effort, {
-      category: cat,
-      routing: `smart_route→${primaryModel}`,
+  const cat = category ?? classifyCategory(task) ?? "deep";
+  const routing = providers.routing?.[cat] ?? providers.routing?.deep;
+  if (!routing) throw new Error(`라우팅 설정 없음: ${cat}`);
+
+  const fullPrompt = context ? `[컨텍스트]\n${context}\n\n[작업]\n${task}` : task;
+
+  let primaryName = routing.provider;
+  let primaryEffort = routing.effort ?? null;
+  let primaryDisabledNote = "";
+
+  // primary가 disabled면 fallback 체인에서 첫 enabled 프로바이더로 대체
+  if (!enabledSet.has(primaryName)) {
+    const fb = pickFirstEnabled(routing.fallback, enabledSet);
+    if (!fb) {
+      throw new Error(`smart_route(${cat}): 사용 가능한(enabled) 프로바이더가 없습니다.`);
+    }
+    primaryDisabledNote = ` (${primaryName} disabled)`;
+    primaryName = fb;
+    primaryEffort = routing.fallback_effort ?? primaryEffort;
+  }
+
+  async function tryProvider(name, effort, logExtra) {
+    const cfg = providers.providers[name];
+    if (!cfg || !cfg.enabled) throw new Error(`프로바이더 비활성화: ${name}`);
+    return callProvider(cfg, {
+      prompt: fullPrompt,
+      model: cfg.default_model,
+      systemPrompt: null,
+      reasoningEffort: effort ?? "medium",
+      maxTokens,
+      temperature: null,
+      logExtra,
     });
-    return `[smart_route: ${cat} → ${primaryModel}]\n\n${result}`;
+  }
+
+  try {
+    const result = await tryProvider(primaryName, primaryEffort, {
+      category: cat,
+      routing: `smart_route→${primaryName}`,
+    });
+    return `[smart_route: ${cat} → ${primaryName}${primaryDisabledNote}]\n\n${result}`;
   } catch (primaryErr) {
-    // Fallback 체인
-    for (const fbModel of routing.fallback) {
+    for (const fbName of routing.fallback ?? []) {
+      if (fbName === primaryName || !enabledSet.has(fbName)) continue;
       try {
-        const result = await tryModel(fbModel, routing.fallbackEffort, {
+        const result = await tryProvider(fbName, routing.fallback_effort, {
           category: cat,
-          routing: `smart_route→${primaryModel}(fail)→${fbModel}`,
+          routing: `smart_route→${primaryName}(fail)→${fbName}`,
         });
-        return `[smart_route: ${cat} → ${fbModel} (${primaryModel} 실패 후 폴백)]\n\n${result}`;
+        return `[smart_route: ${cat} → ${fbName} (${primaryName} 실패 후 폴백)]\n\n${result}`;
       } catch {
         // 다음 폴백으로 계속
       }
@@ -489,25 +705,39 @@ async function callSmartRoute(task, category = null, context = null, maxTokens =
 }
 
 // ───────────────────────────────────────────────
-// ask_parallel — Promise.allSettled() 다중 모델 동시 호출
+// ask_parallel — Promise.allSettled() 다중 모델 동시 호출 (대상 = parallel_default ∩ enabled)
 // ───────────────────────────────────────────────
-async function callAskParallel(prompt, models = null, systemPrompt = null, reasoningEffort = "medium") {
-  const ALL_MODELS = ["gpt", "glm"];
-  const selectedModels = (models ?? ALL_MODELS).filter((m) => ALL_MODELS.includes(m));
-  if (selectedModels.length === 0) selectedModels.push(...ALL_MODELS);
+async function callAskParallel(providers, prompt, models = null, systemPrompt = null, reasoningEffort = "medium") {
+  const enabledNames = getEnabledProviderNames(providers);
+  const defaultTargets = (providers.parallel_default ?? enabledNames).filter((m) => enabledNames.includes(m));
+  const requested = (models ?? []).filter((m) => enabledNames.includes(m));
+  const selected = requested.length > 0 ? requested : defaultTargets;
+
+  if (selected.length === 0) {
+    throw new Error("ask_parallel 사용 불가 — enabled 프로바이더가 하나도 없습니다.");
+  }
 
   const logExtra = { routing: "ask_parallel" };
 
-  const modelCalls = {
-    gpt: () => callGpt(prompt, "gpt-5.3-codex", systemPrompt, reasoningEffort, null, logExtra),
-    glm: () => callGlm(prompt, "glm-5", systemPrompt, null, null, logExtra),
-  };
-
-  const results = await Promise.allSettled(selectedModels.map((m) => modelCalls[m]()));
+  const results = await Promise.allSettled(
+    selected.map((name) => {
+      const cfg = providers.providers[name];
+      return callProvider(cfg, {
+        prompt,
+        model: cfg.default_model,
+        systemPrompt,
+        reasoningEffort,
+        maxTokens: null,
+        temperature: null,
+        logExtra,
+      });
+    })
+  );
 
   return results
     .map((r, i) => {
-      const label = selectedModels[i].toUpperCase();
+      const cfg = providers.providers[selected[i]];
+      const label = cfg?.label ?? selected[i].toUpperCase();
       return r.status === "fulfilled"
         ? `=== ${label} [OK] ===\n${r.value}`
         : `=== ${label} [FAIL] ===\n${r.reason?.message ?? "알 수 없는 오류"}`;
@@ -516,269 +746,327 @@ async function callAskParallel(prompt, models = null, systemPrompt = null, reaso
 }
 
 // ───────────────────────────────────────────────
-// MCP 서버 정의
+// 툴 정의 동적 생성 — enabled 프로바이더마다 ask_<name> 생성
 // ───────────────────────────────────────────────
-const server = new Server(
-  { name: "multi-model-agent", version: "5.3.0" },
-  { capabilities: { tools: {} } }
-);
+function buildSmartRouteDescription(providers) {
+  const lines = [
+    "작업을 카테고리로 분류하여 최적 모델에 자동 라우팅합니다. (OMO 스타일)",
+    "",
+    "【카테고리 → 모델 매핑】",
+  ];
+  for (const [cat, r] of Object.entries(providers.routing ?? {})) {
+    const label = providers.providers[r.provider]?.label ?? r.provider;
+    const effortNote = r.effort ? `(${r.effort})` : "";
+    lines.push(`- ${cat.padEnd(10)} : ${label}${effortNote}`);
+  }
+  lines.push("", "【폴백 체인】 primary 실패(또는 disabled) 시 enabled 프로바이더로 자동 폴백");
+  for (const [cat, r] of Object.entries(providers.routing ?? {})) {
+    if (!r.fallback?.length) continue;
+    const primaryLabel = providers.providers[r.provider]?.label ?? r.provider;
+    const fbLabels = r.fallback.map((f) => providers.providers[f]?.label ?? f).join(" → ");
+    lines.push(`- ${cat.padEnd(10)} : ${primaryLabel} → ${fbLabels}`);
+  }
+  return lines.join("\n");
+}
 
-server.setRequestHandler(ListToolsRequestSchema, async () => ({
-  tools: [
-    // ─── smart_route ────────────────────────────
-    {
-      name: "smart_route",
-      description: [
-        "작업을 카테고리로 분류하여 최적 모델에 자동 라우팅합니다. (OMO 스타일)",
-        "",
-        "【카테고리 → 모델 매핑】",
-        "- ultrabrain : GPT(xhigh) — 전체 아키텍처 설계, 종합 전략",
-        "- deep       : GPT(high)  — 알고리즘, 복잡한 디버깅, 리팩토링",
-        "- visual     : GPT(high)  — UI/UX, React/Vue, 프론트엔드",
-        "- research   : GPT(high)  — 코드베이스 전체 분석, 대규모 파일",
-        "- bulk       : GLM        — 보일러플레이트, CRUD, 반복 패턴",
-        "- writing    : GLM        — 문서, README, 주석 추가",
-        "- quick      : GPT(none)  — 단순 변환, 포맷팅",
-        "",
-        "【폴백 체인】 primary 실패 시 자동 폴백",
-        "- ultrabrain/deep/visual/research → GPT → GLM",
-        "- bulk/writing                   → GLM → GPT",
-        "- quick                          → GPT → GLM",
-      ].join("\n"),
-      inputSchema: {
-        type: "object",
-        properties: {
-          task: { type: "string", description: "수행할 작업 내용 (필수)" },
-          category: {
-            type: "string",
-            description: "카테고리 명시 (선택, 생략 시 키워드로 자동 분류)",
-            enum: ["ultrabrain", "deep", "visual", "research", "bulk", "writing", "quick"],
-          },
-          context: { type: "string", description: "추가 컨텍스트 정보 (코드, 배경 등)" },
-          max_tokens: { type: "number", description: "최대 출력 토큰 수 (선택)" },
-        },
-        required: ["task"],
-      },
+function buildAskParallelDescription(providers) {
+  const defaultLabels = (providers.parallel_default ?? [])
+    .map((name) => providers.providers[name]?.label ?? name)
+    .join(", ");
+  return [
+    "같은 프롬프트를 여러 모델에 동시 전송하여 응답을 비교합니다.",
+    "코드 리뷰, 아키텍처 교차 검증, 중요한 기술 결정에 유용합니다.",
+    "",
+    `기본 대상: ${defaultLabels} (parallel_default ∩ enabled)`,
+    "출력: === GPT [OK] === / === GLM [FAIL] === 형식으로 각 모델 응답 구분",
+  ].join("\n");
+}
+
+function kindDescriptionNote(kind) {
+  switch (kind) {
+    case "openai-responses":
+      return "OpenAI 호환 Responses API 직접 호출. 인증 체인: API 키 → codex CLI → ChatGPT OAuth(옵션).";
+    case "openai-chat":
+      return "OpenAI 호환 Chat Completions API 호출 (GLM/DeepSeek/Groq/OpenRouter/Ollama 등 전부 지원).";
+    case "cli":
+      return "공식 CLI 서브프로세스 실행 (execFile, shell 미사용).";
+    default:
+      return "";
+  }
+}
+
+function buildAskToolDef(name, cfg) {
+  const properties = {
+    prompt: { type: "string", description: `${cfg.label}에게 전달할 작업 내용` },
+    model: {
+      type: "string",
+      description: `사용할 ${cfg.label} 모델`,
+      enum: cfg.models?.length ? cfg.models : [cfg.default_model],
+      default: cfg.default_model,
     },
+    system_prompt: { type: "string", description: "시스템 프롬프트 (선택사항)" },
+    max_tokens: { type: "number", description: "최대 출력 토큰 수 (선택)" },
+  };
 
-    // ─── ask_parallel ────────────────────────────
-    {
-      name: "ask_parallel",
-      description: [
-        "같은 프롬프트를 여러 모델에 동시 전송하여 응답을 비교합니다.",
-        "코드 리뷰, 아키텍처 교차 검증, 중요한 기술 결정에 유용합니다.",
-        "",
-        "출력: === GPT [OK] === / === GLM [FAIL] === 형식으로 각 모델 응답 구분",
-      ].join("\n"),
-      inputSchema: {
-        type: "object",
-        properties: {
-          prompt: { type: "string", description: "모든 모델에게 전달할 프롬프트 (필수)" },
-          models: {
-            type: "array",
-            items: { type: "string", enum: ["gpt", "glm"] },
-            description: "사용할 모델 목록 (선택, 기본: 전체 [gpt, glm])",
-          },
-          system_prompt: { type: "string", description: "시스템 프롬프트 (선택)" },
-          reasoning_effort: {
-            type: "string",
-            description: "GPT 추론 강도 (기본값: medium)",
-            enum: ["none", "low", "medium", "high", "xhigh"],
-            default: "medium",
-          },
+  if (cfg.supports_reasoning_effort) {
+    properties.reasoning_effort = {
+      type: "string",
+      description: "추론 강도 (기본값: medium)",
+      enum: ["none", "low", "medium", "high", "xhigh"],
+      default: "medium",
+    };
+  }
+  if (cfg.supports_temperature) {
+    properties.temperature = { type: "number", description: "온도 파라미터 0.0~2.0 (선택)" };
+  }
+
+  return {
+    name: `ask_${name}`,
+    description: [
+      cfg.description ?? `${cfg.label}에게 작업을 위임합니다.`,
+      "",
+      `【호출 방식】 ${kindDescriptionNote(cfg.kind)}`,
+    ].join("\n"),
+    inputSchema: { type: "object", properties, required: ["prompt"] },
+  };
+}
+
+function buildToolDefinitions(providers) {
+  const tools = [];
+
+  tools.push({
+    name: "smart_route",
+    description: buildSmartRouteDescription(providers),
+    inputSchema: {
+      type: "object",
+      properties: {
+        task: { type: "string", description: "수행할 작업 내용 (필수)" },
+        category: {
+          type: "string",
+          description: "카테고리 명시 (선택, 생략 시 키워드로 자동 분류)",
+          enum: Object.keys(providers.routing ?? {}),
         },
-        required: ["prompt"],
+        context: { type: "string", description: "추가 컨텍스트 정보 (코드, 배경 등)" },
+        max_tokens: { type: "number", description: "최대 출력 토큰 수 (선택)" },
       },
+      required: ["task"],
     },
+  });
 
-    // ─── ask_gpt ─────────────────────────────────
-    {
-      name: "ask_gpt",
-      description: [
-        "GPT-5.3-Codex에게 작업을 위임합니다 (ChatGPT Plus OAuth 인증).",
-        "내부적으로 OpenAI Responses API(/v1/responses)를 사용합니다.",
-        "사전 조건: `codex login` 완료 후 ~/.codex/auth.json 존재 필요.",
-        "",
-        "【이 툴이 적합한 작업】",
-        "- 복잡한 코드 리뷰 및 개선 제안",
-        "- 창의적 글쓰기, 영어 기술 문서 작성",
-        "- 복잡한 알고리즘 설계 및 아키텍처 브레인스토밍",
-        "- 멀티스텝 추론이 필요한 디버깅",
-        "",
-        "【reasoning_effort 가이드】",
-        "- none  : reasoning 토큰 없음 (포맷팅, 단순 변환 — 최저 비용)",
-        "- low   : 빠른 응답 (간단한 질문)",
-        "- medium: 기본값, 대부분의 작업",
-        "- high  : 복잡한 알고리즘, 깊은 코드 분석",
-        "- xhigh : 장시간 아키텍처 설계, 전체 코드베이스 리팩토링",
-      ].join("\n"),
-      inputSchema: {
-        type: "object",
-        properties: {
-          prompt: { type: "string", description: "GPT에게 전달할 작업 내용" },
-          model: {
-            type: "string",
-            description: "사용할 GPT 모델",
-            enum: ["gpt-5.3-codex", "gpt-5.2-codex", "gpt-5.1-codex-max"],
-            default: "gpt-5.3-codex",
-          },
-          reasoning_effort: {
-            type: "string",
-            description: "추론 강도 (기본값: medium)",
-            enum: ["none", "low", "medium", "high", "xhigh"],
-            default: "medium",
-          },
-          system_prompt: { type: "string", description: "시스템 프롬프트 (선택사항)" },
-          max_tokens: { type: "number", description: "최대 출력 토큰 수 (max_output_tokens로 매핑)" },
+  const enabledNames = getEnabledProviderNames(providers);
+  tools.push({
+    name: "ask_parallel",
+    description: buildAskParallelDescription(providers),
+    inputSchema: {
+      type: "object",
+      properties: {
+        prompt: { type: "string", description: "모든 모델에게 전달할 프롬프트 (필수)" },
+        models: {
+          type: "array",
+          items: { type: "string", enum: enabledNames },
+          description: `사용할 모델 목록 (선택, 기본: parallel_default ∩ enabled)`,
         },
-        required: ["prompt"],
-      },
-    },
-
-    // ─── ask_glm ──────────────────────────────────
-    {
-      name: "ask_glm",
-      description: [
-        "GLM-5(Z.ai)에게 작업을 위임합니다. 비용 효율 최우선.",
-        "",
-        "【반드시 이 툴을 먼저 고려할 상황】",
-        "- 보일러플레이트 코드 (CRUD, 마이그레이션, 시드 파일)",
-        "- 반복 패턴 파일 생성 (라우터, 컨트롤러, 모델 2개 이상)",
-        "- 포맷 변환 (JSON↔CSV, SQL 스키마 변환)",
-        "- 주석 추가, 코드 정리, 단순 리팩토링",
-        "- 빠른 초안 작성 (이후 Sonnet이 다듬는 용도)",
-        "",
-        "【성능】 SWE-bench Verified 77.8% (오픈소스 1위)",
-        "【비용】 Sonnet 4.6 대비 약 5~8배 저렴",
-      ].join("\n"),
-      inputSchema: {
-        type: "object",
-        properties: {
-          prompt: { type: "string", description: "GLM-5에게 전달할 작업 내용" },
-          model: {
-            type: "string",
-            description: "사용할 GLM 모델",
-            default: "glm-5",
-          },
-          system_prompt: { type: "string", description: "시스템 프롬프트 (선택사항)" },
-          max_tokens: { type: "number", description: "최대 출력 토큰 수 (기본값: 4096)" },
-          temperature: { type: "number", description: "온도 파라미터 0.0~2.0 (선택)" },
-        },
-        required: ["prompt"],
-      },
-    },
-
-    // ─── get_usage_stats ──────────────────────────
-    {
-      name: "get_usage_stats",
-      description: [
-        "외부 모델(GLM/GPT) 토큰 사용량 통계를 조회합니다.",
-        "모델별 호출 수, 입력/출력 토큰, 비율, 카테고리별 분류 현황을 보여줍니다.",
-      ].join("\n"),
-      inputSchema: {
-        type: "object",
-        properties: {
-          days: {
-            type: "number",
-            description: "조회할 기간 (일). 기본값: 7",
-            default: 7,
-          },
+        system_prompt: { type: "string", description: "시스템 프롬프트 (선택)" },
+        reasoning_effort: {
+          type: "string",
+          description: "GPT류 추론 강도 (기본값: medium)",
+          enum: ["none", "low", "medium", "high", "xhigh"],
+          default: "medium",
         },
       },
+      required: ["prompt"],
     },
-  ],
-}));
+  });
 
-// ── last-call.json 경로 (PostToolUse 훅이 읽음) ─────────────────────────────
-const LAST_CALL_PATH = join(homedir(), "mcp-servers", "multi-model", "last-call.json");
+  for (const [name, cfg] of Object.entries(providers.providers ?? {})) {
+    if (!cfg.enabled) continue;
+    tools.push(buildAskToolDef(name, cfg));
+  }
 
-server.setRequestHandler(CallToolRequestSchema, async (request) => {
-  const { name, arguments: args } = request.params;
-  const callStart = Date.now();
-  let result;
-  let callMeta = { tool: name, status: "ok" };
+  tools.push({
+    name: "get_usage_stats",
+    description: [
+      "외부 모델(GLM/GPT) 토큰 사용량 통계를 조회합니다.",
+      "모델별 호출 수, 입력/출력 토큰, 비율, 카테고리별 분류 현황을 보여줍니다.",
+    ].join("\n"),
+    inputSchema: {
+      type: "object",
+      properties: {
+        days: { type: "number", description: "조회할 기간 (일). 기본값: 7", default: 7 },
+      },
+    },
+  });
 
-  try {
-    switch (name) {
-      case "smart_route":
+  return tools;
+}
+
+// ───────────────────────────────────────────────
+// --selftest — providers.json 로드 결과만 점검하고 종료 (sdk 임포트 없이 동작)
+// ───────────────────────────────────────────────
+async function buildAuthStatus(cfg) {
+  const status = {};
+  const authCfg = cfg.auth ?? {};
+
+  if (cfg.kind === "cli") {
+    status.command = Boolean(cfg.command?.length);
+    return status;
+  }
+
+  if (cfg.kind === "openai-chat") {
+    status.api_key = Boolean(getApiKeyForProvider(authCfg) || isLocalBaseUrl(cfg.base_url));
+    return status;
+  }
+
+  // openai-responses 등 auth_priority 기반 인증
+  const priority = authCfg.auth_priority?.length ? authCfg.auth_priority : ["api_key"];
+  for (const method of priority) {
+    if (method === "api_key") {
+      status.api_key = Boolean(getApiKeyForProvider(authCfg));
+    } else if (method === "codex_cli") {
+      status.codex_cli = await checkCodexAvailable();
+    } else if (method === "chatgpt_oauth") {
+      const auth = readAuthJson();
+      const tokens = auth?.tokens ?? auth ?? {};
+      status.chatgpt_oauth = Boolean(authCfg.allow_chatgpt_oauth && tokens.access_token);
+    }
+  }
+  return status;
+}
+
+async function runSelftest(providers) {
+  const enabled = getEnabledProviderNames(providers);
+  const authStatus = {};
+  for (const [name, cfg] of Object.entries(providers.providers ?? {})) {
+    authStatus[name] = await buildAuthStatus(cfg);
+  }
+  const tools = buildToolDefinitions(providers).map((t) => t.name);
+
+  const output = {
+    schema_version: providers.schema_version,
+    enabled,
+    auth_status: authStatus,
+    tools,
+    routing: providers.routing,
+  };
+
+  console.log(JSON.stringify(output, null, 2));
+}
+
+// ───────────────────────────────────────────────
+// MCP 서버 정의 — sdk는 여기(main)에서만 동적 임포트
+// ───────────────────────────────────────────────
+async function main(providers) {
+  const { Server } = await import("@modelcontextprotocol/sdk/server/index.js");
+  const { StdioServerTransport } = await import("@modelcontextprotocol/sdk/server/stdio.js");
+  const { CallToolRequestSchema, ListToolsRequestSchema } = await import(
+    "@modelcontextprotocol/sdk/types.js"
+  );
+
+  const pkg = JSON.parse(readFileSync(join(SELF_DIR, "package.json"), "utf8"));
+
+  const server = new Server(
+    { name: "multi-model-agent", version: pkg.version },
+    { capabilities: { tools: {} } }
+  );
+
+  server.setRequestHandler(ListToolsRequestSchema, async () => ({
+    tools: buildToolDefinitions(providers),
+  }));
+
+  // ── last-call.json 경로 (PostToolUse 훅이 읽음) ─────────────────────────────
+  const LAST_CALL_PATH = join(homedir(), "mcp-servers", "multi-model", "last-call.json");
+
+  server.setRequestHandler(CallToolRequestSchema, async (request) => {
+    const { name, arguments: args } = request.params;
+    const callStart = Date.now();
+    let result;
+    let callMeta = { tool: name, status: "ok" };
+
+    try {
+      if (name === "smart_route") {
         result = await callSmartRoute(
+          providers,
           args.task,
           args.category ?? null,
           args.context ?? null,
           args.max_tokens ?? null
         );
-        break;
-
-      case "ask_parallel":
+      } else if (name === "ask_parallel") {
         result = await callAskParallel(
+          providers,
           args.prompt,
           args.models ?? null,
           args.system_prompt ?? null,
           args.reasoning_effort ?? "medium"
         );
-        break;
-
-      case "ask_gpt":
-        result = await callGpt(
-          args.prompt,
-          args.model ?? "gpt-5.3-codex",
-          args.system_prompt ?? null,
-          args.reasoning_effort ?? "medium",
-          args.max_tokens ?? null
-        );
-        break;
-
-      case "ask_glm":
-        result = await callGlm(
-          args.prompt,
-          args.model ?? "glm-5",
-          args.system_prompt ?? null,
-          args.max_tokens ?? null,
-          args.temperature ?? null
-        );
-        break;
-
-      case "get_usage_stats":
+      } else if (name === "get_usage_stats") {
         result = getUsageStats(args?.days ?? 7);
-        break;
-
-      default:
+      } else if (name.startsWith("ask_")) {
+        const providerName = name.slice(4);
+        const cfg = providers.providers[providerName];
+        if (!cfg || !cfg.enabled) {
+          throw new Error(`알 수 없거나 비활성화된 프로바이더: ${providerName}`);
+        }
+        result = await callProvider(cfg, {
+          prompt: args.prompt,
+          model: args.model ?? cfg.default_model,
+          systemPrompt: args.system_prompt ?? null,
+          reasoningEffort: args.reasoning_effort ?? "medium",
+          maxTokens: args.max_tokens ?? null,
+          temperature: args.temperature ?? null,
+          logExtra: {},
+        });
+      } else {
         result = `알 수 없는 툴: ${name}`;
+      }
+    } catch (err) {
+      callMeta.status = "error";
+      callMeta.error  = err.message;
+      result = `[오류] ${err.message}`;
     }
-  } catch (err) {
-    callMeta.status = "error";
-    callMeta.error  = err.message;
-    result = `[오류] ${err.message}`;
-  }
 
-  // ── 메타데이터 기록 (PostToolUse 훅용) ────────────────────────────────────
-  callMeta.elapsed_ms = Date.now() - callStart;
-  callMeta.timestamp  = new Date().toISOString();
+    // ── 메타데이터 기록 (PostToolUse 훅용, 동적 프로바이더에 맞게 일반화) ───────────
+    callMeta.elapsed_ms = Date.now() - callStart;
+    callMeta.timestamp  = new Date().toISOString();
 
-  if (name === "smart_route" && typeof result === "string") {
-    const m = result.match(/^\[smart_route: (\w+) \u2192 (\w+)/);
-    if (m) {
-      callMeta.category = m[1];
-      const mdl = m[2];
-      callMeta.model   = mdl === "gpt" ? "gpt-5.3-codex" : "glm-5";
-      callMeta.routing = "smart_route\u2192" + mdl;
+    if (name === "smart_route" && typeof result === "string") {
+      const m = result.match(/^\[smart_route: (\w+) → (\w+)/);
+      if (m) {
+        const [, cat, providerName] = m;
+        callMeta.category = cat;
+        callMeta.model   = providers.providers[providerName]?.default_model ?? providerName;
+        callMeta.routing = "smart_route→" + providerName;
+      }
+    } else if (name === "ask_parallel") {
+      callMeta.model            = "parallel";
+      callMeta.models           = args?.models ?? providers.parallel_default;
+      callMeta.reasoning_effort = args?.reasoning_effort ?? "medium";
+    } else if (name.startsWith("ask_")) {
+      const providerName = name.slice(4);
+      const cfg = providers.providers[providerName];
+      callMeta.model = args?.model ?? cfg?.default_model;
+      if (cfg?.supports_reasoning_effort) {
+        callMeta.reasoning_effort = args?.reasoning_effort ?? "medium";
+      }
     }
-  } else if (name === "ask_gpt") {
-    callMeta.model            = args?.model ?? "gpt-5.3-codex";
-    callMeta.reasoning_effort = args?.reasoning_effort ?? "medium";
-  } else if (name === "ask_glm") {
-    callMeta.model = args?.model ?? "glm-5";
-  } else if (name === "ask_parallel") {
-    callMeta.model            = "parallel";
-    callMeta.models           = args?.models ?? ["gpt", "glm"];
-    callMeta.reasoning_effort = args?.reasoning_effort ?? "medium";
-  }
 
-  // 비동기 쓰기: 이벤트 루프 block 없이 훅용 메타데이터 기록
-  writeFile(LAST_CALL_PATH, JSON.stringify(callMeta)).catch(() => {});
+    // 비동기 쓰기: 이벤트 루프 block 없이 훅용 메타데이터 기록
+    writeFile(LAST_CALL_PATH, JSON.stringify(callMeta)).catch(() => {});
 
-  return { content: [{ type: "text", text: result }] };
-});
+    return { content: [{ type: "text", text: result }] };
+  });
 
-const transport = new StdioServerTransport();
-await server.connect(transport);
+  const transport = new StdioServerTransport();
+  await server.connect(transport);
+}
+
+// ───────────────────────────────────────────────
+// 엔트리포인트
+// ───────────────────────────────────────────────
+const providers = loadProviders();
+
+if (process.argv.includes("--selftest")) {
+  await runSelftest(providers);
+} else {
+  await main(providers);
+}

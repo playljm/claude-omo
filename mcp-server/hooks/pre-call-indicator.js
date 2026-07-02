@@ -7,11 +7,34 @@
  * 등록: settings.json PreToolUse — matcher: "mcp__multi-model-agent"
  */
 
-import { writeFileSync } from "fs";
+import { readFileSync, writeFileSync, existsSync } from "fs";
 import { join } from "path";
 import { homedir } from "os";
 
 const PRE_CALL_STATE = join(homedir(), "mcp-servers", "multi-model", "pre-call-state.json");
+const MAX_AGE_MS = 60000; // 60초 지난 엔트리는 청소 (레이스로 남은 고아 엔트리 방지)
+
+// ── djb2 해시 (tool_input 식별용 — post-call-logger.js와 동일 구현 유지) ──
+function djb2(str) {
+  let hash = 5381;
+  for (let i = 0; i < str.length; i++) {
+    hash = ((hash << 5) + hash + str.charCodeAt(i)) >>> 0;
+  }
+  return hash.toString(36);
+}
+
+// ── 상태 맵 읽기 + 오래된 엔트리 청소 ──────────────────────────────
+function readState() {
+  if (!existsSync(PRE_CALL_STATE)) return {};
+  let map;
+  try { map = JSON.parse(readFileSync(PRE_CALL_STATE, "utf8")); } catch { return {}; }
+  if (!map || typeof map !== "object") return {};
+  const now = Date.now();
+  for (const key of Object.keys(map)) {
+    if (!map[key]?.ts || now - map[key].ts > MAX_AGE_MS) delete map[key];
+  }
+  return map;
+}
 
 // ── stdin 읽기 (for await 패턴) ────────────────────────────────────
 const chunks = [];
@@ -46,14 +69,17 @@ const effort = toolInput.reasoning_effort ?? null;
 const model  = toolInput.model ?? null;
 
 // ── 시작 타임스탬프 저장 (PostToolUse에서 elapsed 계산용) ──────────
-const startState = {
-  start: Date.now(),
+// 단일 오브젝트가 아닌 { [tool:hash]: entry } 맵으로 저장 — 동시 호출 레이스 완화
+const key = `${tool}:${djb2(JSON.stringify(toolInput))}`;
+const state = readState();
+state[key] = {
+  ts: Date.now(),
   tool,
   model: model ?? meta.short,
   icon: meta.icon,
   category: cat,
 };
-try { writeFileSync(PRE_CALL_STATE, JSON.stringify(startState)); } catch {}
+try { writeFileSync(PRE_CALL_STATE, JSON.stringify(state)); } catch {}
 
 // ── 출력 (1~2줄 이내 — truncation 방지) ──────────────────────────
 const parts = [`${meta.icon} ${meta.short}`];

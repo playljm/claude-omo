@@ -1,11 +1,5 @@
 ---
-name: usage
-description: 외부 모델(GPT/GLM) 토큰 사용량 통계 조회
-user-invocable: true
-metadata:
-  version: "1.0.0"
-  category: "workflow"
-  updated: "2026-02-23"
+description: 외부 모델(GPT/GLM) 토큰 사용량 통계 조회. Usage: /usage [일수]
 ---
 
 아래 Python 코드를 Bash 툴로 실행하여 결과를 출력하세요. 추가 설명 없이 결과만 보여주세요.

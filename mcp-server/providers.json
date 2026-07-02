@@ -1,0 +1,44 @@
+{
+  "schema_version": 1,
+  "providers": {
+    "gpt": {
+      "enabled": true,
+      "label": "GPT",
+      "kind": "openai-responses",
+      "base_url": "https://api.openai.com/v1",
+      "auth": {
+        "api_key_env": "OPENAI_API_KEY",
+        "auth_priority": ["api_key", "codex_cli", "chatgpt_oauth"],
+        "allow_chatgpt_oauth": false
+      },
+      "default_model": "gpt-5.3-codex",
+      "models": ["gpt-5.3-codex", "gpt-5.2-codex", "gpt-5.1-codex-max"],
+      "supports_reasoning_effort": true,
+      "description": "복잡한 코드리뷰, 알고리즘, 아키텍처"
+    },
+    "glm": {
+      "enabled": true,
+      "label": "GLM",
+      "kind": "openai-chat",
+      "base_url": "https://api.z.ai/api/paas/v4",
+      "auth": {
+        "api_key_env": "GLM_API_KEY"
+      },
+      "default_model": "glm-5",
+      "models": ["glm-5"],
+      "max_tokens_default": 4096,
+      "supports_temperature": true,
+      "description": "보일러플레이트, 볼륨 작업 — 비용 효율 최우선"
+    }
+  },
+  "routing": {
+    "ultrabrain": { "provider": "gpt", "effort": "xhigh", "fallback": ["glm"] },
+    "deep":       { "provider": "gpt", "effort": "high",  "fallback": ["glm"] },
+    "visual":     { "provider": "gpt", "effort": "high",  "fallback": ["glm"] },
+    "research":   { "provider": "gpt", "effort": "high",  "fallback": ["glm"] },
+    "bulk":       { "provider": "glm", "fallback": ["gpt"], "fallback_effort": "medium" },
+    "writing":    { "provider": "glm", "fallback": ["gpt"], "fallback_effort": "medium" },
+    "quick":      { "provider": "gpt", "effort": "none", "fallback": ["glm"] }
+  },
+  "parallel_default": ["gpt", "glm"]
+}

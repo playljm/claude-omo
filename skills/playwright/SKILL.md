@@ -23,8 +23,7 @@ description: "Browser automation via Playwright MCP. MUST USE for any browser-re
 ### Navigation
 ```
 browser_navigate(url)
-browser_go_back()
-browser_go_forward()
+browser_navigate_back()
 browser_wait_for(selector_or_text)
 ```
 
@@ -34,21 +33,29 @@ browser_click(element)
 browser_type(element, text)
 browser_select_option(element, value)
 browser_hover(element)
-browser_key_press(key)
+browser_press_key(key)
+browser_drag(startElement, endElement)
+browser_drop(element)
+browser_fill_form(fields)
+browser_file_upload(paths)
+browser_handle_dialog(accept, promptText)
 ```
 
 ### Capture
 ```
-browser_screenshot()
-browser_pdf_save(path)
-browser_get_text(selector)
+browser_take_screenshot()
+browser_snapshot()
 browser_evaluate(script)
+browser_console_messages()
+browser_network_requests()
 ```
 
 ### Session
 ```
-browser_new_tab(url)
-browser_close_tab()
+browser_tabs(action, index, url)   # list/new/close/select 통합 도구
+browser_resize(width, height)
+browser_close()
+browser_run_code_unsafe(code)      # 검증된 코드만, 신중히 사용
 ```
 
 ## Best Practices
@@ -83,14 +90,14 @@ browser_wait_for(".loading-spinner", { state: "hidden" })
 ```
 1. browser_navigate(url)
 2. browser_wait_for(".content-loaded")
-3. browser_get_text(".main-content") or browser_evaluate(script)
+3. browser_snapshot() or browser_evaluate(script) — 텍스트/데이터 추출
 4. 데이터 파싱 및 반환
 ```
 
 ### UI 검증
 ```
 1. 브라우저에서 해당 URL 열기
-2. browser_screenshot() — 현재 상태 캡처
+2. browser_take_screenshot() — 현재 상태 캡처
 3. 예상 요소 확인
 4. 반응형: 뷰포트 변경 후 재확인
 ```

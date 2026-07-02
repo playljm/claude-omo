@@ -1,3 +1,4 @@
+<!-- OMO:START -->
 ## 멀티모델 오케스트레이션 (OMO-Style)
 
 ### 플랜 정책
@@ -65,7 +66,7 @@ UI/프론트 작업?           → ask_gpt(high) (visual)
 - 전체 설계, 기술 스택 선택, 마이그레이션 전략
 
 **`ask_parallel`** — 교차 검증 필요 시
-- 3모델 동시 응답으로 컨센서스 확인
+- 2모델(GPT+GLM) 동시 응답으로 컨센서스 확인
 - 코드 리뷰, 중요한 기술 결정, 의견 충돌 해소
 
 ---
@@ -109,10 +110,30 @@ ask_parallel(
 각 Teammate에 사용 MCP 툴 명시.
 
 **사용 가능한 전문 에이전트** (`.claude/agents/`):
-- `oracle`     — Claude Opus 4.6 아키텍처 컨설턴트 (읽기 전용)
+- `oracle`     — Claude Opus (최신) 아키텍처 컨설턴트 (읽기 전용)
 - `researcher` — GPT(high) 대규모 코드 분석 (읽기 전용)
 - `worker`     — GLM + 구현 도구 (모든 도구)
 - `reviewer`   — ask_parallel 코드 리뷰 (읽기 전용)
+
+---
+
+## HARD 모드
+
+토큰 절약 정책(sonnet/haiku 기본)의 명시적 예외. 아주 어려운 문제·되돌리기 힘든 결정·
+크리티컬한 작업 전용이며, 비용은 신경 쓰지 않고 품질만 최대화한다.
+
+**트리거**: `/hard <작업>`, 또는 메시지에 `hardmode`/`하드모드` 키워드 (ulw-detector가 감지).
+
+**5단계 프로토콜**:
+1. ultrathink 초심층 분석 — 정합성/설계/리스크 3관점 분해, TodoWrite 강제
+2. 최대 병렬화 — 독립 서브태스크는 병렬 Task 에이전트로 동시 실행
+3. 외부 모델 총동원 — 핵심 판단은 `smart_route(category="ultrabrain")`(GPT xhigh) + `oracle` 이중 자문, 교차검증은 `ask_parallel`
+4. 적대적 검증 — `reviewer`(ask_parallel)와 `momus` 채점으로 검증, 8/10 미만이면 재작업
+5. 완료 보장 — 모든 todo 완료·검증 통과 전 종료 금지 (ralph 루프와 동일한 지속 규칙)
+
+Ultracode 서브에이전트 모델 정책의 명시적 예외 — 이 모드에서는 최상위 모델 상속을 허용한다.
+
+중지: `/stop-continuation`.
 
 ---
 
@@ -120,6 +141,7 @@ ask_parallel(
 
 메인 모델이 Fable/Opus일 때(특히 ultracode·워크플로 오케스트레이션) 메인 루프는
 오케스트레이션·계획·최종 판단만 담당하고, 실제 작업 에이전트는 저비용 모델을 기본으로 쓴다.
+예외: HARD 모드(`/hard`)에서는 이 제한이 해제된다.
 
 **규칙: Workflow `agent()`와 Agent(Task) 호출 시 model을 항상 명시적으로 지정한다.**
 (생략 = 메인 모델 상속 = 고비용. 상속은 아래 "최상위 허용" 케이스에만.)
@@ -132,3 +154,18 @@ ask_parallel(
 
 **effort 병행**: haiku·기계적 스테이지는 `effort: 'low'`, 일반 sonnet 작업은 기본값,
 최종 판정·synthesis 스테이지만 high 이상.
+
+---
+
+## 모델 추가/제거 (providers.json)
+
+`~/mcp-servers/multi-model/providers.json`에서 외부 모델 프로바이더를 관리한다.
+
+- **추가**: 새 프로바이더 블록을 등록. OpenAI 호환 API(`/v1/chat/completions` 스펙을 따르는 서비스)는
+  `kind: "openai-chat"`으로 지정하면 코드 수정 없이 바로 붙는다.
+- **제거**: 블록을 삭제하지 말고 `enabled: false`로 비활성화 (롤백 용이).
+- 변경 후에는 반드시 Claude Code를 재시작해야 반영된다 (MCP 서버 프로세스 재기동 필요).
+- **ToS 주의**: ChatGPT 계정의 OAuth 토큰을 직접 호출하는 방식은 이용약관 위반 소지가 있어 기본
+  비활성화되어 있다. `OPENAI_API_KEY` 정식 API 키를 쓰거나, 이미 인증된 `codex` CLI를 경유하는
+  방식을 권장한다.
+<!-- OMO:END -->

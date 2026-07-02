@@ -29,12 +29,21 @@ normalize_path() {
 # Python 인터프리터 검색 (Windows Store stub 회피)
 # ────────────────────────────────────────────────────────────────
 find_python() {
+  # timeout 명령 확인 (macOS 기본 설치엔 timeout이 없음 → gtimeout으로 폴백,
+  # 둘 다 없으면 래핑 없이 직접 실행)
+  local timeout_prefix=""
+  if command -v timeout >/dev/null 2>&1; then
+    timeout_prefix="timeout 2s"
+  elif command -v gtimeout >/dev/null 2>&1; then
+    timeout_prefix="gtimeout 2s"
+  fi
+
   # python3 → python → py -3 순서로 검색
   for cmd in python3 python 'py -3'; do
     # 명령 존재 여부 확인
     if command -v ${cmd%% *} >/dev/null 2>&1; then
       # 실제 인터프리터인지 테스트 (Windows Store stub은 타임아웃)
-      if timeout 2s $cmd -c "import sys" >/dev/null 2>&1; then
+      if $timeout_prefix $cmd -c "import sys" >/dev/null 2>&1; then
         PYTHON_CMD="$cmd"
         info "Python 인터프리터 발견: $PYTHON_CMD"
         return 0
@@ -116,6 +125,7 @@ collect_key() {
 }
 
 GLM_KEY=$(collect_key "GLM_API_KEY" "https://open.bigmodel.cn")
+echo "  ※ ChatGPT OAuth 직접 호출은 ToS 위반 소지로 기본 비활성화됐습니다. OPENAI_API_KEY(권장) 또는 codex CLI를 사용하세요."
 OPENAI_KEY=$(collect_key "OPENAI_API_KEY" "https://platform.openai.com/api-keys")
 
 # ────────────────────────────────────────────────────────────────
@@ -126,14 +136,36 @@ if ! find_python; then
   exit 1
 fi
 
-# 키가 없으면 기존 settings.json에서 복원 시도 (재설치 시 키 유지)
+# 키가 없으면 기존 등록 파일에서 복원 시도 (재설치 시 키 유지)
+# 우선순위: ~/.claude.json (claude mcp add --scope user 정식 등록 경로)
+#          > ~/.claude/settings.json (직접 편집 폴백 경로)
+_EXISTING_CLAUDE_JSON="$HOME/.claude.json"
 _EXISTING_SETTINGS="$HOME/.claude/settings.json"
-if [[ -f "$_EXISTING_SETTINGS" ]]; then
-  _get_existing_key() {
-    $PYTHON_CMD -c "import json; s=json.load(open('$_EXISTING_SETTINGS')); print(s.get('mcpServers',{}).get('multi-model-agent',{}).get('env',{}).get('$1',''))" 2>/dev/null || echo ""
-  }
-  [[ -z "$GLM_KEY"    ]] && GLM_KEY=$(_get_existing_key "GLM_API_KEY")    && [[ -n "$GLM_KEY"    ]] && warn "GLM_API_KEY: settings.json 기존 키 재사용" >&2 || true
-  [[ -z "$OPENAI_KEY" ]] && OPENAI_KEY=$(_get_existing_key "OPENAI_API_KEY") && [[ -n "$OPENAI_KEY" ]] && warn "OPENAI_API_KEY: settings.json 기존 키 재사용" >&2 || true
+
+_get_env_key() {
+  # $1: 파일 경로  $2: 환경변수 이름
+  local file="$1" key="$2"
+  [[ -f "$file" ]] || return 0
+  $PYTHON_CMD -c "import json; s=json.load(open('$file')); print(s.get('mcpServers',{}).get('multi-model-agent',{}).get('env',{}).get('$key',''))" 2>/dev/null || echo ""
+}
+
+if [[ -z "$GLM_KEY" ]]; then
+  GLM_KEY=$(_get_env_key "$_EXISTING_CLAUDE_JSON" "GLM_API_KEY")
+  if [[ -n "$GLM_KEY" ]]; then
+    warn "GLM_API_KEY: ~/.claude.json 기존 키 재사용" >&2
+  else
+    GLM_KEY=$(_get_env_key "$_EXISTING_SETTINGS" "GLM_API_KEY")
+    [[ -n "$GLM_KEY" ]] && warn "GLM_API_KEY: settings.json 기존 키 재사용" >&2 || true
+  fi
+fi
+if [[ -z "$OPENAI_KEY" ]]; then
+  OPENAI_KEY=$(_get_env_key "$_EXISTING_CLAUDE_JSON" "OPENAI_API_KEY")
+  if [[ -n "$OPENAI_KEY" ]]; then
+    warn "OPENAI_API_KEY: ~/.claude.json 기존 키 재사용" >&2
+  else
+    OPENAI_KEY=$(_get_env_key "$_EXISTING_SETTINGS" "OPENAI_API_KEY")
+    [[ -n "$OPENAI_KEY" ]] && warn "OPENAI_API_KEY: settings.json 기존 키 재사용" >&2 || true
+  fi
 fi
 
 [[ -n "$GLM_KEY"     ]] && info "GLM_API_KEY 수집됨"     || warn "GLM_API_KEY 건너뜀 (나중에 수동 설정 필요)"
@@ -142,9 +174,22 @@ fi
 # ─── 4. MCP 서버 설치 ──────────────────────────────────────
 step "MCP 서버 설치: $MCP_DIR"
 mkdir -p "$MCP_DIR"
+
+# providers.json은 사용자가 직접 편집하는 설정 파일 — 재설치 시 기존 값 보존
+_PROVIDERS_JSON="$MCP_DIR/providers.json"
+_PROVIDERS_BACKUP="$MCP_DIR/.providers.json.omo-bak"
+[[ -f "$_PROVIDERS_JSON" ]] && cp "$_PROVIDERS_JSON" "$_PROVIDERS_BACKUP"
+
 cp -r "$REPO_DIR/mcp-server/." "$MCP_DIR/"
+
+if [[ -f "$_PROVIDERS_BACKUP" ]]; then
+  mv "$_PROVIDERS_BACKUP" "$_PROVIDERS_JSON"
+  info "providers.json: 기존 사용자 설정 보존"
+fi
+
 (cd "$MCP_DIR" && npm install --silent --no-audit)
-info "MCP 서버 설치 완료 ($(node -e "console.log(require('$MCP_DIR/package.json').version)" 2>/dev/null || echo 'v4.0.0'))"
+MCP_VERSION=$($PYTHON_CMD -c "import json; print(json.load(open('$MCP_DIR/package.json')).get('version','unknown'))" 2>/dev/null || echo "unknown")
+info "MCP 서버 설치 완료 ($MCP_VERSION)"
 
 # ─── 5. 에이전트 복사 ──────────────────────
 step "에이전트 복사: $CLAUDE_DIR/agents/"
@@ -156,9 +201,26 @@ info "에이전트 ${AGENT_COUNT}개 복사 완료 (sisyphus+, oracle, researche
 # ─── 6. 커맨드 복사 ──────────────────────
 step "커맨드 복사: $CLAUDE_DIR/commands/"
 mkdir -p "$CLAUDE_DIR/commands"
-cp "$REPO_DIR/commands/"*.md "$CLAUDE_DIR/commands/"
+
+# 로컬에서 직접 커스터마이징한 커맨드는 재설치 시 덮어쓰지 않음
+PROTECTED_COMMANDS=("finish.md")
+
+for _src in "$REPO_DIR/commands/"*.md; do
+  _fname="$(basename "$_src")"
+  _dst="$CLAUDE_DIR/commands/$_fname"
+  _is_protected=false
+  for _p in "${PROTECTED_COMMANDS[@]}"; do
+    [[ "$_fname" == "$_p" ]] && _is_protected=true && break
+  done
+  if [[ "$_is_protected" == "true" && -f "$_dst" ]] && ! diff -q "$_src" "$_dst" >/dev/null 2>&1; then
+    warn "$_fname: 로컬 커스텀 보호로 스킵"
+    continue
+  fi
+  cp "$_src" "$_dst"
+done
+
 CMD_COUNT=$(ls "$CLAUDE_DIR/commands/"*.md 2>/dev/null | wc -l | tr -d ' ')
-info "커맨드 ${CMD_COUNT}개 복사 완료 (plan, route, compare, ralph-loop, ulw-loop, handoff, init-deep, start-work, stop-continuation, cancel-ralph, refactor, finish, usage)"
+info "커맨드 ${CMD_COUNT}개 복사 완료 (plan, route, compare, ralph-loop, ulw-loop, handoff, init-deep, start-work, stop-continuation, cancel-ralph, refactor, finish, usage, hard)"
 
 # ─── 6a. 스킬 복사 ─────────────────────
 step "스킬 복사: $CLAUDE_DIR/skills/"
@@ -169,33 +231,43 @@ if [[ -d "$REPO_DIR/skills" ]]; then
   info "스킬 ${SKILL_COUNT}개 복사 완료 (git-master, frontend-ui-ux, playwright)"
 fi
 
-# ─── 7. CLAUDE.md 복사 ─────────────────────────────────────
-step "CLAUDE.md 복사: $CLAUDE_DIR/CLAUDE.md"
+# ─── 7. CLAUDE.md 병합 ─────────────────────────────────────
+# 레포 CLAUDE.md는 <!-- OMO:START --> ~ <!-- OMO:END --> 마커로 감싸져 배포된다.
+# 기존 파일에 마커 쌍이 있으면 그 블록만 레포 버전으로 교체하고,
+# 마커가 없는 기존 파일이면 사용자 내용을 보존한 채 파일 끝에 레포 버전을 append한다.
+step "CLAUDE.md 병합: $CLAUDE_DIR/CLAUDE.md"
 if [[ -f "$CLAUDE_DIR/CLAUDE.md" ]]; then
-  # 인터랙티브 모드인 경우에만 사용자 확인
-  if [[ -t 0 ]]; then
-    echo "" >&2
-    warn "기존 CLAUDE.md 파일이 존재합니다." >&2
-    echo "  [y] 덮어쓰기 (기존 파일은 백업됨)" >&2
-    echo "  [n] 건너뜀 (기존 파일 유지)" >&2
-    echo "" >&2
-    echo -n "  선택 [y/N]: " >&2
-    read -r overwrite_choice
-    if [[ "${overwrite_choice,,}" != "y" ]]; then
-      warn "CLAUDE.md 덮어쓰기 건너뜀 (기존 파일 유지)"
-    else
-      BACKUP="$CLAUDE_DIR/CLAUDE.md.bak.$(date +%Y%m%d_%H%M%S)"
-      cp "$CLAUDE_DIR/CLAUDE.md" "$BACKUP"
-      cp "$REPO_DIR/CLAUDE.md" "$CLAUDE_DIR/CLAUDE.md"
-      info "기존 CLAUDE.md → $BACKUP 로 백업 후 덮어쓰기 완료"
-    fi
-  else
-    # 비인터랙티브 모드: 백업 후 덮어쓰기
-    BACKUP="$CLAUDE_DIR/CLAUDE.md.bak.$(date +%Y%m%d_%H%M%S)"
-    cp "$CLAUDE_DIR/CLAUDE.md" "$BACKUP"
-    cp "$REPO_DIR/CLAUDE.md" "$CLAUDE_DIR/CLAUDE.md"
-    warn "비인터랙티브 모드: 기존 CLAUDE.md → $BACKUP 로 백업 후 덮어쓰기"
-  fi
+  BACKUP="$CLAUDE_DIR/CLAUDE.md.bak.$(date +%Y%m%d_%H%M%S)"
+  cp "$CLAUDE_DIR/CLAUDE.md" "$BACKUP"
+
+  $PYTHON_CMD - "$CLAUDE_DIR/CLAUDE.md" "$REPO_DIR/CLAUDE.md" <<'PYEOF'
+import re, sys
+
+user_path, repo_path = sys.argv[1], sys.argv[2]
+
+with open(repo_path, 'r', encoding='utf-8') as f:
+    repo_content = f.read()
+with open(user_path, 'r', encoding='utf-8') as f:
+    user_content = f.read()
+
+START = "<!-- OMO:START -->"
+END   = "<!-- OMO:END -->"
+pattern = re.compile(re.escape(START) + r".*?" + re.escape(END), re.DOTALL)
+
+if pattern.search(user_content):
+    merged = pattern.sub(lambda m: repo_content.strip(), user_content, count=1)
+    mode = "마커 블록 교체"
+else:
+    sep = "" if user_content.endswith("\n") else "\n"
+    merged = user_content + sep + "\n" + repo_content.rstrip("\n") + "\n"
+    mode = "기존 내용 보존 + append"
+
+with open(user_path, 'w', encoding='utf-8') as f:
+    f.write(merged)
+
+print(f"  CLAUDE.md 병합 완료 ({mode})")
+PYEOF
+  info "기존 CLAUDE.md → $BACKUP 로 백업 후 병합 완료"
 else
   cp "$REPO_DIR/CLAUDE.md" "$CLAUDE_DIR/CLAUDE.md"
   info "CLAUDE.md 복사 완료"
@@ -246,6 +318,8 @@ comment_cmd    = f"{node_bin} {mcp_path}/hooks/comment-checker.js 2>/dev/null ||
 write_guard_cmd = f"{node_bin} {mcp_path}/hooks/write-guard.js 2>/dev/null || true"
 pre_indicator_cmd = f"{node_bin} {mcp_path}/hooks/pre-call-indicator.js 2>/dev/null || true"
 post_logger_cmd   = f"{node_bin} {mcp_path}/hooks/post-call-logger.js 2>/dev/null || true"
+routing_display_cmd = f"{node_bin} {mcp_path}/hooks/routing-display.js 2>/dev/null || true"
+agent_banner_cmd    = f"{node_bin} {mcp_path}/hooks/agent-banner.js 2>/dev/null || true"
 
 upsert_hook(hooks, "UserPromptSubmit", ulw_cmd)
 upsert_hook(hooks, "SessionEnd", sess_cmd)
@@ -268,10 +342,13 @@ upsert_matcher_hook(hooks, "PreToolUse",  "Write",      write_guard_cmd)
 # v5.3: MCP 호출 진행 표시기 + 활동 로거
 upsert_matcher_hook(hooks, "PreToolUse",  "mcp__multi-model-agent", pre_indicator_cmd)
 upsert_matcher_hook(hooks, "PostToolUse", "mcp__multi-model-agent", post_logger_cmd)
+# v6.0: 라우팅 정보 표시 + 에이전트 배너
+upsert_matcher_hook(hooks, "PostToolUse", "mcp__multi-model-agent", routing_display_cmd)
+upsert_matcher_hook(hooks, "PreToolUse",  "Task",                   agent_banner_cmd)
 
 with open(settings_path, 'w', encoding='utf-8') as f:
     json.dump(s, f, indent=2, ensure_ascii=False)
-print(f"  훅 등록: UserPromptSubmit, SessionEnd, PreToolUse(2), PostToolUse(2) — v5.3")
+print(f"  훅 등록: UserPromptSubmit, SessionEnd, PreToolUse(3), PostToolUse(2) — v6.0")
 PYEOF
 info "settings.json 훅 등록 완료"
 
@@ -398,20 +475,19 @@ echo ""
 echo "════════════════════════════════════════════════"
 info "claude-omo 설치 완료!"
 echo ""
-echo "  슬래시 커맨드 (14개):"
-echo "    /compare <질문>      — GPT·GLM 2모델 동시 비교"
-echo "    /plan   <기능>      — Prometheus 인터뷰 기반 계획"
-echo "    /route  <작업>      — smart_route 자동 라우팅"
-echo "    /ralph-loop <태스크> — 100% 완료까지 자동 루프"
-echo "    /ulw-loop <태스크>   — 최대 강도 ULW 루프"
-echo "    /handoff             — 세션 연속 컨텍스트 저장"
-echo "    /init-deep           — AGENTS.md 계층적 생성"
-echo "    /refactor <대상>    — 지능형 리팩토링 (Grep+Edit 기반)"
-echo "    /update-omo [msg]    — 변경사항 배포 + GitHub push"
-echo "    /start-work          — Prometheus 계획 실행"
-echo "    /stop-continuation   — 자동 진행 중지"
-echo "    /finish              — 작업 마무리 체크리스트"
-echo "    /usage [일수]        — 외부 모델 토큰 사용량 조회"
+echo "  슬래시 커맨드 (${CMD_COUNT}개):"
+for _cmd_file in "$CLAUDE_DIR/commands/"*.md; do
+  _cmd_name="$(basename "$_cmd_file" .md)"
+  _cmd_desc=$($PYTHON_CMD -c "
+import re
+with open('$_cmd_file', encoding='utf-8') as fh:
+    text = fh.read()
+m = re.search(r'^description:\s*(.+)\$', text, re.MULTILINE)
+desc = m.group(1).strip().strip('\"') if m else ''
+print(desc[:47] + '...' if len(desc) > 50 else desc)
+" 2>/dev/null || echo "")
+  printf "    /%-16s — %s\n" "$_cmd_name" "$_cmd_desc"
+done
 echo ""
 echo "  에이전트 (13개):"
 echo "    sisyphus(+IntentGate) · oracle · researcher · worker · reviewer"

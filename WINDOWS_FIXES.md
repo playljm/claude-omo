@@ -1,3 +1,5 @@
+> ⚠️ 역사 문서 — v4.x 시절 install.sh 기준이라 현재 라인 번호·변수명과 다름. 현행 문제는 TROUBLESHOOT.md 참고.
+
 # install.sh Windows MSYS Compatibility Fixes
 
 ## Issue Analysis & Priority Ranking

@@ -24,7 +24,44 @@ try {
   prompt = raw;
 }
 
-if (/\bulw\b|\bultrawork\b/i.test(prompt)) {
+// 하이픈을 단어문자로 취급 — "ulw-detector.js" 같은 파일명 오탐 방지
+const ULW_RE = /(^|[^-\w])(ulw|ultrawork)(?=[^-\w]|$)/i;
+const HARD_RE = /(^|[^-\w])(hardmode|hard[ -]?mode|하드모드)(?=[^-\w]|$)/i;
+
+// 플랫폼별 배너 출력 — Windows만 CONOUT$ 직접 쓰기 시도, 그 외는 stderr
+async function writeBanner(banner) {
+  try {
+    if (process.platform === "win32") {
+      // Windows: CONOUT$는 현재 콘솔에 직접 쓰기 (파이프 우회)
+      const { openSync, writeSync, closeSync } = await import("fs");
+      const fd = openSync("\\\\.\\CONOUT$", "a");
+      writeSync(fd, banner);
+      closeSync(fd);
+    } else {
+      process.stderr.write(banner);
+    }
+  } catch {
+    // 폴백: stderr (CONOUT$ 접근 불가 시)
+    process.stderr.write(banner);
+  }
+}
+
+const E = "\x1b";
+
+if (HARD_RE.test(prompt)) {
+  // HARD 모드는 ULW와 동시 매치되어도 우선 적용
+  const instructions = `[HARD MODE 활성화] 이 작업은 하드모드로 수행한다: (1) ultrathink 수준으로 깊게 분석하고 작업을 분해해 TodoWrite로 추적. (2) 독립 서브태스크는 병렬 Task 에이전트로 최대 동원 — 하드모드에서는 서브에이전트 모델 제한이 해제되며 최상위 모델 사용 허용. (3) 핵심 판단은 smart_route(category=ultrabrain)과 oracle 자문을 병행. (4) 구현 결과는 ask_parallel 교차검증 + momus 채점으로 검증하고 8/10 미만이면 재작업. (5) 모든 todo가 완료·검증되기 전에 턴을 끝내지 마라.`;
+
+  // stdout → Claude 컨텍스트 주입
+  console.log(instructions);
+
+  const banner =
+    `\n${E}[1;91m╔══════════════════════════════════════╗${E}[0m\n` +
+    `${E}[1;91m║${E}[0m  ${E}[1;93m🔥 HARD MODE${E}[0m ${E}[2m— 최상위 모델·최대 병렬${E}[0m ${E}[1;91m║${E}[0m\n` +
+    `${E}[1;91m╚══════════════════════════════════════╝${E}[0m\n`;
+
+  await writeBanner(banner);
+} else if (ULW_RE.test(prompt)) {
   const instructions = `╔══════════════════════════════════════╗
 ║  ULW MODE (Ultrawork) — 시지프스     ║
 ╚══════════════════════════════════════╝
@@ -54,22 +91,10 @@ if (/\bulw\b|\bultrawork\b/i.test(prompt)) {
   // stdout → Claude 컨텍스트 주입
   console.log(instructions);
 
-  // Windows CONOUT$ 직접 쓰기 (Claude Code의 stdio 파이핑 우회)
-  // PowerShell/Windows Terminal에서 ANSI 색상 배너를 실제로 표시
-  const E = "\x1b";
   const banner =
     `\n${E}[1;96m╔══════════════════════════════════════╗${E}[0m\n` +
     `${E}[1;96m║${E}[0m  ${E}[1;93m⚡ ULW MODE${E}[0m ${E}[1;97m(Ultrawork)${E}[0m ${E}[2m— 시지프스${E}[0m     ${E}[1;96m║${E}[0m\n` +
     `${E}[1;96m╚══════════════════════════════════════╝${E}[0m\n`;
 
-  try {
-    // Windows: CONOUT$는 현재 콘솔에 직접 쓰기 (파이프 우회)
-    const { openSync, writeSync, closeSync } = await import("fs");
-    const fd = openSync("\\\\.\\CONOUT$", "a");
-    writeSync(fd, banner);
-    closeSync(fd);
-  } catch {
-    // 폴백: stderr (Linux/Mac 또는 CONOUT$ 접근 불가 시)
-    process.stderr.write(banner);
-  }
+  await writeBanner(banner);
 }
