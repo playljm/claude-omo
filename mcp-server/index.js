@@ -280,8 +280,8 @@ function getJwtInfo(token) {
 }
 
 const SCOPE_RE_LOGIN_MSG =
-  "Windows에서 `codex login` 실행 후 auth.json을 이 서버로 복사하세요:\n" +
-  "  scp ~/.codex/auth.json root@<서버IP>:~/.codex/auth.json\n" +
+  "`OPENAI_API_KEY` 설정 또는 서버에서 `codex login` 실행을 권장합니다.\n" +
+  "브라우저 없는 서버에서 auth.json 복사가 불가피하면 전용 사용자 계정으로 복사하고 `chmod 600 ~/.codex/auth.json`을 적용하세요.\n" +
   "※ OpenAI refresh grant가 api.responses.write 스코프를 유지하지 않는 제한입니다.";
 
 async function doRefreshToken(refreshToken, clientId) {

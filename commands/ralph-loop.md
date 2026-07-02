@@ -44,10 +44,11 @@ For each subtask, pick the optimal agent:
 If stuck on a task for more than 2 attempts:
 1. Ask oracle for architecture guidance
 2. Try an alternative approach
-3. If still stuck, document the blocker and move to the next task
-4. Return to blocked tasks after gaining more context
+3. If the same blocker repeats, stop the loop, report the blocker, and ask for the next decision
+4. Do not add more expensive model calls until the user confirms the new direction
 
-DO NOT output a summary and stop. KEEP WORKING.
+Do not stop merely because there are unfinished todos. Stop only for the repeated-blocker rule above,
+or when the user runs `/stop-continuation`.
 
 ## Status Reporting
 

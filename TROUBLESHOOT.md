@@ -10,10 +10,10 @@ Linux(Ubuntu / Rocky) 서버에서 반복적으로 발생하는 문제와 해결
 |------------|------|--------|
 | `GLM_API_KEY 환경변수 없음` | .bashrc가 MCP에 전달 안 됨 | [→ GLM 환경변수 주입](#1-glm-환경변수-없음) |
 | `insufficient balance` | 위와 동일 (잔액이 아님) | [→ GLM 환경변수 주입](#1-glm-환경변수-없음) |
-| `~/.codex/auth.json 파일이 없습니다` | codex login 미실행 | [→ GPT auth.json 복사](#2-gpt-authon-없음) |
+| `~/.codex/auth.json 파일이 없습니다` | API 키/codex CLI/OAuth opt-in 모두 없음 | [→ GPT 인증 설정](#2-gpt-인증-설정) |
 | `access_token이 없습니다` | auth.json 구조 불완전 | [→ auth.json 구조 확인](#3-gpt-토큰-구조-불완전) |
 | `토큰이 만료되었고 refresh_token이 없습니다` | 오래된 auth.json | [→ auth.json 재복사](#4-gpt-토큰-만료) |
-| `api.responses.write 스코프가 없습니다` | ChatGPT OAuth 한계 (이미 자동 해결됨) | [→ Codex 백엔드 자동 사용](#8-gpt--chatgpt-oauth-codex-백엔드-자동-처리) |
+| `api.responses.write 스코프가 없습니다` | ChatGPT OAuth 직접 호출 opt-in 상태에서 스코프 부족 | [→ GPT 인증 우선순위](#8-gpt-인증-우선순위와-oauth-제한) |
 | `SessionEnd IndexError` | settings.json 빈 배열 | install.sh 재실행 |
 | `settings.json 경로 오류` | Windows Git Bash 경로 | install.sh 재실행 |
 | `도구를 찾을 수 없습니다` | claude mcp add 미실행 | [→ MCP 미등록](#5-설치-후-mcp가-등록-안-됨-가장-흔한-문제) |
@@ -25,11 +25,11 @@ Linux(Ubuntu / Rocky) 서버에서 반복적으로 발생하는 문제와 해결
 
 | 모델 | 모델명 | 인증 방식 | 필요한 것 |
 |------|--------|-----------|-----------|
-| **GPT** | `gpt-5.3-codex` | OAuth JWT | `~/.codex/auth.json` |
-| **GLM** | `glm-5` | API Key | `GLM_API_KEY` in settings.json env |
+| **GPT** | `gpt-5.3-codex` | API 키 → codex CLI → ChatGPT OAuth opt-in | `OPENAI_API_KEY` 또는 `codex login` 권장 |
+| **GLM** | `glm-5` | API Key | `GLM_API_KEY` in Claude MCP env |
 
 > **핵심**: Linux에서 `.bashrc` export는 MCP 서버에 **전달되지 않음**.
-> API 키는 반드시 `~/.claude/settings.json`의 `mcpServers.multi-model-agent.env`에 있어야 함.
+> `install.sh`가 `claude mcp add -e`로 MCP env를 등록하며, 실패 시 settings.json 직접 편집으로 폴백함.
 
 ---
 
@@ -82,7 +82,7 @@ cat ~/.claude/settings.json
 
 ---
 
-## 2. GPT — auth.json 없음
+## 2. GPT — 인증 설정
 
 ### 증상
 ```
@@ -90,46 +90,35 @@ cat ~/.claude/settings.json
 ```
 
 ### 원인
-서버 환경에서 브라우저 OAuth 불가.
+`OPENAI_API_KEY`, `codex` CLI 인증, ChatGPT OAuth opt-in 경로가 모두 실패함.
 
 ### 해결법
 
-**방법 1 — 다른 머신에서 복사 (권장)**
+**방법 1 — OPENAI_API_KEY 사용 (권장)**
 ```bash
-# Windows/Mac에서 codex login 완료 후 이 서버로 복사
-scp ~/.codex/auth.json root@<서버IP>:~/.codex/auth.json
-
-# 서버에서 수신 디렉토리 먼저 생성
-ssh root@<서버IP> "mkdir -p ~/.codex"
+export OPENAI_API_KEY=sk-...
+cd ~/claude-omo && bash install.sh
 ```
 
-**방법 2 — install.sh 실행 중 붙여넣기**
+**방법 2 — 서버에서 codex CLI 로그인**
 ```bash
-bash install.sh
-# "auth.json 내용을 지금 붙여넣을까요? [y/N]:" 에서 y 입력
-# Windows ~/.codex/auth.json 내용 붙여넣기 → Ctrl+D
+codex login
 ```
 
-**방법 3 — 직접 생성**
+**방법 3 — auth.json 복사 (마지막 수단)**
 ```bash
-mkdir -p ~/.codex
-cat > ~/.codex/auth.json << 'EOF'
-{
-  "auth_mode": "chatgpt",
-  "tokens": {
-    "access_token": "여기에_access_token",
-    "refresh_token": "여기에_refresh_token",
-    "id_token": "여기에_id_token",
-    "account_id": "여기에_account_id"
-  },
-  "last_refresh": "2026-01-01T00:00:00.000Z"
-}
-EOF
+# 전용 사용자 계정으로만 복사. root 공유 금지.
+ssh <user>@<서버IP> "mkdir -p ~/.codex && chmod 700 ~/.codex"
+scp ~/.codex/auth.json <user>@<서버IP>:~/.codex/auth.json
+ssh <user>@<서버IP> "chmod 600 ~/.codex/auth.json"
 ```
+
+`auth.json`에는 refresh token이 들어갈 수 있음. 문서/로그/이슈/채팅에 원문을 붙여넣지 말 것.
+ChatGPT OAuth 직접 호출은 `providers.json`에서 `allow_chatgpt_oauth: true`로 opt-in해야 하며 권장하지 않음.
 
 **확인**
 ```bash
-cat ~/.codex/auth.json | python3 -c "import json,sys; d=json.load(sys.stdin); print('OK' if d.get('tokens',{}).get('access_token') else 'FAIL')"
+node ~/mcp-servers/multi-model/index.js --selftest
 ```
 
 ---
@@ -146,20 +135,20 @@ auth.json이 있지만 `tokens.access_token` 필드가 없음.
 
 ### 확인
 ```bash
-cat ~/.codex/auth.json
+python3 - <<'PY'
+import json, pathlib
+p = pathlib.Path.home()/'.codex/auth.json'
+d = json.loads(p.read_text())
+t = d.get('tokens', d)
+print('access_token:', 'OK' if t.get('access_token') else 'MISSING')
+print('refresh_token:', 'OK' if t.get('refresh_token') else 'MISSING')
+PY
 ```
-다음 구조인지 확인:
-```json
-{
-  "tokens": {
-    "access_token": "eyJhbG...",   ← 이게 있어야 함
-    "refresh_token": "rt_..."       ← 이게 있어야 자동 갱신
-  }
-}
-```
+토큰 값 자체는 출력하지 않음.
 
 ### 해결법
-Windows에서 `~/.codex/auth.json` 재복사.
+가능하면 `OPENAI_API_KEY` 또는 서버에서 `codex login`을 사용. 복사가 꼭 필요하면 전용 사용자 계정으로
+권한을 제한해 재복사.
 
 ---
 
@@ -176,14 +165,16 @@ Windows에서 `~/.codex/auth.json` 재복사.
 - 또는 refresh_token도 만료됨 (장기 미사용)
 
 ### 해결법
-Windows에서 `codex login` 후 auth.json 재복사:
+권장 순서:
 ```bash
-# Windows에서
-codex login   # 브라우저에서 재인증
+# 1. 정식 API 키 사용
+export OPENAI_API_KEY=sk-...
 
-# 서버로 재복사
-scp ~/.codex/auth.json root@<서버IP>:~/.codex/auth.json
+# 2. 또는 서버에서 공식 CLI 로그인
+codex login
 ```
+
+브라우저 없는 서버라서 복사가 불가피하면 전용 사용자 계정으로 복사하고 `chmod 600 ~/.codex/auth.json`을 적용.
 
 ---
 
@@ -325,67 +316,50 @@ print('SessionEnd hook:', '✅' if sess else '❌')
 
 ---
 
-## 8. GPT — ChatGPT OAuth Codex 백엔드 자동 처리
+## 8. GPT — 인증 우선순위와 OAuth 제한
 
-### v4.1 이후: 스코프 없어도 자동으로 동작합니다
+### 현재 v6.0+ 동작
 
-**이전 버전**에서는 `api.responses.write` 스코프 없음 → Chat Completions 폴백 → HTTP 429 크레딧 부족 실패 체인이 발생했음.
+GPT 프로바이더는 `providers.json`의 `auth_priority` 순서대로 인증을 시도함.
 
-**v4.1 수정 후**: `isOAuthOnly = true` 감지 시 `chatgpt.com/backend-api/codex/responses` 엔드포인트를 직접 사용.
-ChatGPT Pro 구독 OAuth 토큰으로 GPT-5.3-Codex를 정상 호출합니다.
+| 우선순위 | 방식 | 상태 |
+|----------|------|------|
+| 1순위 | `OPENAI_API_KEY` | 권장. 정식 OpenAI 플랫폼 API |
+| 2순위 | `codex` CLI | 권장. 공식 CLI를 서브프로세스로 실행 |
+| 3순위 | ChatGPT OAuth `auth.json` | 기본 비활성화. `allow_chatgpt_oauth: true`일 때만 시도 |
 
-### 작동 원리
+`auth.json`의 ChatGPT OAuth 토큰을 MCP 서버가 직접 API 호출에 쓰는 방식은 ToS 리스크가 있어 기본적으로
+꺼져 있음. 켠 경우에도 현재 코드는 `api.responses.write` 스코프가 없으면 실패시키고,
+Codex backend 직접 호출로 자동 우회하지 않음.
 
-```
-JWT 스코프 확인 → api.responses.write 없음 → isOAuthOnly = true
-   ↓
-JWT에서 https://api.openai.com/auth 클레임 추출 → chatgpt_account_id 획득
-   ↓
-POST https://chatgpt.com/backend-api/codex/responses
-Headers:
-  Authorization: Bearer <access_token>
-  chatgpt-account-id: <chatgpt_account_id>
-  OpenAI-Beta: responses=experimental
-  originator: codex_cli_rs
-Body: { model, instructions, store: false, stream: true, input: [...] }
-   ↓
-SSE 파싱 → response.completed 이벤트 → output_text 추출
-```
+### `api.responses.write 스코프가 없습니다`
 
-### 여전히 실패하는 경우
+이 에러가 나오면 우선 아래 중 하나로 전환:
 
-**증상:**
-```
-ChatGPT account_id를 JWT에서 추출할 수 없습니다.
-```
-
-**해결법:** `codex login` 재실행 (Windows에서)
 ```bash
-# Windows에서
-codex login   # 브라우저 재인증
+# 권장 1: 정식 API 키 등록
+export OPENAI_API_KEY=sk-...
+cd ~/claude-omo && bash install.sh
 
-# 서버로 재복사
-scp ~/.codex/auth.json root@<서버IP>:~/.codex/auth.json
+# 권장 2: 서버에서 공식 codex CLI 로그인
+codex login
 ```
 
-**증상:**
-```
-GPT Codex backend 오류 (HTTP 403 또는 HTTP 401)
+ChatGPT OAuth를 계속 쓰려면 `providers.json`에서 명시적으로 opt-in:
+
+```json
+{
+  "providers": {
+    "gpt": {
+      "auth": {
+        "allow_chatgpt_oauth": true
+      }
+    }
+  }
+}
 ```
 
-**해결법:** ChatGPT Plus/Pro 구독 상태 확인. 구독이 활성 상태여야 Codex 백엔드 접근 가능.
-
-### OPENAI_API_KEY가 있으면 우선 사용됩니다
-
-| 우선순위 | 방식 | 엔드포인트 |
-|----------|------|-----------|
-| 1순위 | OPENAI_API_KEY 환경변수 | api.openai.com/v1/responses |
-| 2순위 | auth.json의 OPENAI_API_KEY | api.openai.com/v1/responses |
-| 3순위 | ChatGPT OAuth (자동) | chatgpt.com/backend-api/codex/responses |
-```bash
-# OPENAI_API_KEY를 명시적으로 설정하고 싶을 때:
-bash ~/claude-omo/install.sh   # OPENAI_API_KEY 프롬프트에서 입력
-```
+단, 이 경로는 권장하지 않음. 토큰 파일은 `chmod 600 ~/.codex/auth.json`으로 제한하고 원문을 출력하지 말 것.
 
 ---
 

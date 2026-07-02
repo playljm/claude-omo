@@ -2,9 +2,8 @@
 /**
  * Write Guard Hook — PreToolUse on Write
  *
- * 권고성(advisory) 훅 — 실제 차단은 하지 않음.
- * Prevents accidental overwrites of existing files
- * when the agent hasn't read them first.
+ * Blocks accidental full-file overwrites of existing files.
+ * Set OMO_WRITE_GUARD_MODE=warn to keep the legacy advisory-only behavior.
  *
  * Install: Add to settings.json hooks → PreToolUse
  * Command: node ~/mcp-servers/multi-model/hooks/write-guard.js
@@ -38,10 +37,27 @@ process.stdin.on("end", () => {
 
   if (!filePath) process.exit(0);
 
-  // Check if file exists
   if (existsSync(filePath)) {
-    console.log(
-      `\n⚠️  Write Guard: "${filePath}" already exists.\n\nBefore overwriting:\n1. Read the current file with the Read tool\n2. Understand the existing code\n3. Use Edit for targeted changes (preferred over full Write)\n\nIf full rewrite is intentional, proceed. Otherwise, use Edit.`
-    );
+    const reason =
+      `Write Guard blocked full overwrite of existing file: ${filePath}\n\n` +
+      "Use Edit/MultiEdit for targeted changes. If a full rewrite is intentional, " +
+      "set OMO_WRITE_GUARD_MODE=warn for this hook and retry.";
+
+    const mode = (process.env.OMO_WRITE_GUARD_MODE ?? "block").toLowerCase();
+    if (mode === "warn" || mode === "advisory") {
+      process.stderr.write(`\n⚠️  ${reason}\n`);
+      process.exit(0);
+    }
+    if (mode === "off" || mode === "allow") {
+      process.exit(0);
+    }
+
+    process.stdout.write(JSON.stringify({
+      hookSpecificOutput: {
+        hookEventName: "PreToolUse",
+        permissionDecision: "deny",
+        permissionDecisionReason: reason,
+      },
+    }));
   }
 });

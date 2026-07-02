@@ -2,7 +2,7 @@
 /**
  * ULW (Ultrawork) Mode Detector — UserPromptSubmit Hook
  *
- * "ulw" 또는 "ultrawork" 키워드 감지 시 시지프스 모드 지시를 주입한다.
+ * 명시적 ULW/HARD 트리거 감지 시 시지프스/HARD 모드 지시를 주입한다.
  * Claude Code가 UserPromptSubmit 시 이 스크립트를 실행하고,
  * stdout 출력을 Claude에게 추가 컨텍스트로 전달한다.
  */
@@ -24,9 +24,9 @@ try {
   prompt = raw;
 }
 
-// 하이픈을 단어문자로 취급 — "ulw-detector.js" 같은 파일명 오탐 방지
-const ULW_RE = /(^|[^-\w])(ulw|ultrawork)(?=[^-\w]|$)/i;
-const HARD_RE = /(^|[^-\w])(hardmode|hard[ -]?mode|하드모드)(?=[^-\w]|$)/i;
+// Costly loop modes require explicit opt-in, not incidental keyword mentions.
+const ULW_RE = /(^|\s)(\/ulw-loop\b|ulw\s*(mode|모드)?\s*:|ultrawork\s*(mode|모드)?\s*:|ulw\s+(mode|모드)\b|ultrawork\s+(mode|모드)\b)/i;
+const HARD_RE = /(^|\s)(\/hard\b|hard\s*mode\s*:|hardmode\s*:|하드모드\s*:|hardmode\s+on\b|하드모드\s+켜)/i;
 
 // 플랫폼별 배너 출력 — Windows만 CONOUT$ 직접 쓰기 시도, 그 외는 stderr
 async function writeBanner(banner) {

@@ -1,5 +1,15 @@
 # Changelog
 
+## [6.0.1] - 2026-07-02
+
+### Fixed - feedback hardening
+
+- **문서 정합성**: README/TROUBLESHOOT의 quick 라우팅과 GPT 인증 안내를 현재 v6 코드 기준으로 수정
+- **인증 안내 보안**: root 계정 auth.json 복사, 토큰 원문 붙여넣기, 수동 토큰 파일 생성 안내 제거. `OPENAI_API_KEY` 또는 서버 직접 `codex login`을 우선 안내
+- **`write-guard.js`**: 기존 파일 `Write` 호출을 실제 PreToolUse deny로 차단. `OMO_WRITE_GUARD_MODE=warn`일 때만 legacy advisory 모드 사용
+- **`ulw-detector.js`**: `ulw`/`hardmode` 단순 언급으로 고비용 루프가 켜지지 않도록 명시적 트리거(`ulw:`, `/ulw-loop`, `hardmode:`, `/hard`)만 허용
+- **테스트**: `node --test` 기반 safety 테스트 추가. write-guard 차단, ULW/HARD 오탐 방지, quick 라우팅 selftest 검증
+
 ## [6.0.0] - 2026-07-02
 
 ### Added - providers.json 플러그인 아키텍처 + HARD 모드
@@ -81,7 +91,7 @@
 
 #### 커맨드 개선
 - **`commands/refactor.md`**: 존재하지 않는 LSP 도구(`lsp_find_references`, `lsp_rename`, `ast_grep_*`) → Claude Code 네이티브 도구(Grep, Edit, Bash)로 전면 재작성
-- **`commands/finish.md`**: private 서버 IP(100.70.193.60) 및 JARVIS 섹션 제거 (공개 레포 정리)
+- **`commands/finish.md`**: private 서버 IP 및 JARVIS 섹션 제거 (공개 레포 정리)
 
 #### 설치 스크립트
 - **`install.sh`**: GEMINI_API_KEY 수집/주입 로직 완전 제거, 커맨드 수 13→14 수정

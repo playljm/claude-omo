@@ -443,31 +443,16 @@ else
   echo ""
   echo "  [방법 2] 다른 머신에서 auth.json 복사 (브라우저 없는 서버용)"
   if [[ "$OS" == "linux" ]]; then
-    echo "    # Windows/Mac 머신에서 실행:"
+    echo "    # 마지막 수단입니다. root 공유 대신 전용 사용자 계정으로만 복사하세요:"
+    echo "    ssh $(whoami)@<이-서버-IP> \"mkdir -p ~/.codex && chmod 700 ~/.codex\""
     echo "    scp ~/.codex/auth.json $(whoami)@<이-서버-IP>:~/.codex/auth.json"
+    echo "    ssh $(whoami)@<이-서버-IP> \"chmod 600 ~/.codex/auth.json\""
     echo ""
-    echo "    # 또는 이 서버에서 직접:"
-    echo "    mkdir -p ~/.codex"
-    echo "    cat > ~/.codex/auth.json << 'EOF'"
-    echo "    { \"auth_mode\": \"chatgpt\", \"tokens\": { \"access_token\": \"...\", \"refresh_token\": \"...\" } }"
-    echo "    EOF"
+    echo "    auth.json에는 refresh token이 포함될 수 있으므로 로그/채팅/문서에 붙여넣지 마세요."
   fi
   echo ""
   mkdir -p "$HOME/.codex"
-  # 비인터랙티브 모드면 안내만 출력
-  if [[ ! -t 0 ]]; then
-    warn "비인터랙티브 모드: auth.json 수동 생성 필요. 나중에 codex login 실행 또는 파일 복사하세요."
-  else
-    echo -n "  auth.json 내용을 지금 붙여넣을까요? [y/N]: "
-    read -r paste_auth
-    if [[ "${paste_auth,,}" == "y" ]]; then
-      echo "  auth.json 내용을 붙여넣고 Ctrl+D로 완료:"
-      cat > "$CODEX_AUTH"
-      info "~/.codex/auth.json 저장 완료"
-    else
-      warn "GPT는 나중에 auth.json 복사 후 사용 가능"
-    fi
-  fi
+  warn "install.sh는 더 이상 auth.json 원문 붙여넣기를 받지 않습니다. OPENAI_API_KEY 또는 codex login을 권장합니다."
 fi
 
 # ─── 완료 ──────────────────────────────────────────────────

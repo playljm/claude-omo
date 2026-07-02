@@ -20,6 +20,7 @@ Follow ALL Ralph Loop rules, PLUS:
 3. **Use ALL available MCP tools**: smart_route, ask_parallel for cross-validation
 4. **Zero tolerance for incomplete work**: Every edge case handled, every error caught
 5. **Continuous verification**: Run tests/lint after EVERY implementation step, not just at the end
+6. **Runaway guard**: If the same verification or external-model failure repeats twice, stop the loop and report the blocker instead of spending more tokens
 
 ## Enhanced Agent Usage
 
@@ -57,4 +58,4 @@ ONLY stop when ALL of these are true:
 - [ ] All tests pass
 - [ ] Manual verification done
 
-KEEP WORKING. DO NOT STOP.
+Keep working only while progress is being made. Stop on repeated blockers or when the user runs `/stop-continuation`.
