@@ -71,36 +71,12 @@ UI/프론트 작업?           → ask_gpt(high) (visual)
 
 ---
 
-### ask_parallel 교차 검증 가이드
-
-```
-ask_parallel(
-  prompt="이 알고리즘을 최적화하는 방법은?",
-  models=["gpt", "glm"]
-)
-→ 2개 응답 동시 수신 → 공통 지적사항 = 확실한 개선점
-```
-
-사용 시점: 코드 리뷰, 아키텍처 의견 수렴, 중요한 기술 결정의 교차 검증
-
----
-
 ### Sonnet 직접 처리 범위 (외부 모델 불필요)
 
 - 50줄 미만 코드 수정 (원인이 명확한 버그 포함)
 - 간단한 파일 읽기/탐색/설명
 - 대화, 질문 답변, 개념 설명
 - 즉각적인 단일 파일 변경
-
----
-
-### reasoning_effort 가이드 (ask_gpt 사용 시)
-
-- `none`  : 포맷팅, 단순 변환 (reasoning 토큰 없음, 최저 비용)
-- `low`   : 빠른 응답, 간단한 질문
-- `medium`: 기본값, 대부분의 작업
-- `high`  : 복잡한 알고리즘, 깊은 코드 분석
-- `xhigh` : 아키텍처 설계, 전체 리팩토링, 전략 결정
 
 ---
 
@@ -119,23 +95,9 @@ ask_parallel(
 
 ## HARD 모드
 
-토큰 절약 정책(sonnet/haiku 기본)의 명시적 예외. 아주 어려운 문제·되돌리기 힘든 결정·
-크리티컬한 작업 전용이며, 비용은 신경 쓰지 않고 품질만 최대화한다.
-
-**트리거**: `/hard <작업>`, `hardmode: <작업>`, `하드모드: <작업>`.
-일반 문장 속 `hardmode`/`ulw` 언급은 비용 폭주 방지를 위해 트리거하지 않는다.
-
-**5단계 프로토콜**:
-1. ultrathink 초심층 분석 — 정합성/설계/리스크 3관점 분해, TodoWrite 강제
-2. 최대 병렬화 — 독립 서브태스크는 병렬 Task 에이전트로 동시 실행
-3. 외부 모델 총동원 — 핵심 판단은 `smart_route(category="ultrabrain")`(GPT xhigh) + `oracle` 이중 자문, 교차검증은 `ask_parallel`
-4. 적대적 검증 — `reviewer`(ask_parallel)와 `momus` 채점으로 검증, 8/10 미만이면 재작업
-5. 완료 보장 — 모든 todo 완료·검증 통과 전 종료 금지 (ralph 루프와 동일한 지속 규칙)
-
-Ultracode 서브에이전트 모델 정책의 명시적 예외 — 이 모드에서는 최상위 모델 상속을 허용한다.
-
-중지: `/stop-continuation`. 2회 연속 같은 검증 실패나 외부 모델 실패가 반복되면 계속 루프를 돌지 말고
-현재 상태와 다음 선택지를 보고한다.
+토큰 절약 정책의 명시적 예외 — 아주 어려운 문제·되돌리기 힘든 결정·크리티컬 작업 전용, 비용 무관 품질 최우선.
+트리거: `/hard <작업>`, `hardmode: <작업>`, `하드모드: <작업>` (일반 문장 속 `hardmode`/`ulw` 언급은 비용 폭주 방지를 위해 비트리거). 5단계 프로토콜 전문은 `/hard` 명령 본문 참조.
+Ultracode 서브에이전트 모델 정책 해제(최상위 모델 상속 허용). 중지: `/stop-continuation`. 같은 검증·외부 모델 실패가 2회 연속이면 루프 대신 현재 상태와 선택지를 보고한다.
 
 ---
 
@@ -159,15 +121,7 @@ Ultracode 서브에이전트 모델 정책의 명시적 예외 — 이 모드에
 
 ---
 
-## 모델 추가/제거 (providers.json)
+## 모델 추가/제거·effort·교차검증 상세
 
-`~/mcp-servers/multi-model/providers.json`에서 외부 모델 프로바이더를 관리한다.
-
-- **추가**: 새 프로바이더 블록을 등록. OpenAI 호환 API(`/v1/chat/completions` 스펙을 따르는 서비스)는
-  `kind: "openai-chat"`으로 지정하면 코드 수정 없이 바로 붙는다.
-- **제거**: 블록을 삭제하지 말고 `enabled: false`로 비활성화 (롤백 용이).
-- 변경 후에는 반드시 Claude Code를 재시작해야 반영된다 (MCP 서버 프로세스 재기동 필요).
-- **ToS 주의**: ChatGPT 계정의 OAuth 토큰을 직접 호출하는 방식은 이용약관 위반 소지가 있어 기본
-  비활성화되어 있다. `OPENAI_API_KEY` 정식 API 키를 쓰거나, 이미 인증된 `codex` CLI를 경유하는
-  방식을 권장한다.
+providers.json 프로바이더 관리, reasoning_effort 가이드, ask_parallel 사용 예시는 `multi-model-config` 스킬 참조.
 <!-- OMO:END -->
