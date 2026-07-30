@@ -1,4 +1,3 @@
-<!-- OMO:START -->
 ## 멀티모델 오케스트레이션 (OMO-Style)
 
 ### 플랜 정책
@@ -125,7 +124,6 @@ Ultracode 서브에이전트 모델 정책 해제(최상위 모델 상속 허용
 ## 모델 추가/제거·effort·교차검증 상세
 
 providers.json 프로바이더 관리, reasoning_effort 가이드, ask_parallel 사용 예시는 `multi-model-config` 스킬 참조.
-<!-- OMO:END -->
 
 ---
 
