@@ -114,7 +114,8 @@ Ultracode 서브에이전트 모델 정책 해제(최상위 모델 상속 허용
 |------|------|
 | `haiku` | 기계적 작업 — 파일 스캔/수집, grep성 탐색, 포맷 변환, 단순 요약, 목록 취합, 체크리스트 검증 |
 | `sonnet` | **기본값** — 구현, 리팩토링, 1차 코드 리뷰, 조사/분석, 문서 작성, 테스트 작성 |
-| 최상위 상속(fable/opus) | 꼭 필요한 경우에만 — ①아키텍처 최종 결정·설계 트레이드오프 ②adversarial verify 최종 판정(judge) ③복수 결과 최종 synthesis ④sonnet 2회 이상 실패한 고난도 디버깅 |
+| `fable` (명시 지정) | 최종 판정 스테이지 전용 — ①adversarial verify 최종 판정(judge) ②복수 결과 최종 synthesis. 메인 모델이 opus여도 `model: "fable"`을 명시적으로 지정해 최상위 판정 품질을 확보한다 |
+| 최상위 상속(fable/opus) | 꼭 필요한 경우에만 — ①아키텍처 최종 결정·설계 트레이드오프 ②sonnet 2회 이상 실패한 고난도 디버깅 |
 
 **effort 병행**: haiku·기계적 스테이지는 `effort: 'low'`, 일반 sonnet 작업은 기본값,
 최종 판정·synthesis 스테이지만 high 이상.
