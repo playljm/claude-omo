@@ -234,46 +234,10 @@ if [[ -d "$REPO_DIR/skills" ]]; then
 fi
 
 # ─── 7. CLAUDE.md 병합 ─────────────────────────────────────
-# 레포 CLAUDE.md는 <!-- OMO:START --> ~ <!-- OMO:END --> 마커로 감싸져 배포된다.
-# 기존 파일에 마커 쌍이 있으면 그 블록만 레포 버전으로 교체하고,
-# 마커가 없는 기존 파일이면 사용자 내용을 보존한 채 파일 끝에 레포 버전을 append한다.
+# 레포 CLAUDE.md는 마커 없이 관리하고, 배포본에만 <!-- OMO:START/END --> 마커를 씌워
+# 그 블록만 교체한다. 병합 구현은 /update-omo와 scripts/merge-claude-md.py로 공유한다.
 step "CLAUDE.md 병합: $CLAUDE_DIR/CLAUDE.md"
-if [[ -f "$CLAUDE_DIR/CLAUDE.md" ]]; then
-  BACKUP="$CLAUDE_DIR/CLAUDE.md.bak.$(date +%Y%m%d_%H%M%S)"
-  cp "$CLAUDE_DIR/CLAUDE.md" "$BACKUP"
-
-  $PYTHON_CMD - "$CLAUDE_DIR/CLAUDE.md" "$REPO_DIR/CLAUDE.md" <<'PYEOF'
-import re, sys
-
-user_path, repo_path = sys.argv[1], sys.argv[2]
-
-with open(repo_path, 'r', encoding='utf-8') as f:
-    repo_content = f.read()
-with open(user_path, 'r', encoding='utf-8') as f:
-    user_content = f.read()
-
-START = "<!-- OMO:START -->"
-END   = "<!-- OMO:END -->"
-pattern = re.compile(re.escape(START) + r".*?" + re.escape(END), re.DOTALL)
-
-if pattern.search(user_content):
-    merged = pattern.sub(lambda m: repo_content.strip(), user_content, count=1)
-    mode = "마커 블록 교체"
-else:
-    sep = "" if user_content.endswith("\n") else "\n"
-    merged = user_content + sep + "\n" + repo_content.rstrip("\n") + "\n"
-    mode = "기존 내용 보존 + append"
-
-with open(user_path, 'w', encoding='utf-8') as f:
-    f.write(merged)
-
-print(f"  CLAUDE.md 병합 완료 ({mode})")
-PYEOF
-  info "기존 CLAUDE.md → $BACKUP 로 백업 후 병합 완료"
-else
-  cp "$REPO_DIR/CLAUDE.md" "$CLAUDE_DIR/CLAUDE.md"
-  info "CLAUDE.md 복사 완료"
-fi
+$PYTHON_CMD "$REPO_DIR/scripts/merge-claude-md.py" "$CLAUDE_DIR/CLAUDE.md" "$REPO_DIR/CLAUDE.md"
 
 # ─── 8. settings.json 훅 등록 ──────────────────────────────
 step "settings.json 훅 등록"

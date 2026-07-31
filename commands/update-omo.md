@@ -75,11 +75,10 @@ fi
 [ -d "$GLOBAL/commands" ] && cp -f "$REPO"/commands/*.md "$GLOBAL/commands/" && echo "글로벌 commands 업데이트"
 [ -d "$GLOBAL/skills" ]   && cp -rf "$REPO"/skills/. "$GLOBAL/skills/" && echo "글로벌 skills 업데이트"
 
-# CLAUDE.md 변경 여부 확인 후 업데이트
-if ! diff -q "$REPO/CLAUDE.md" "$GLOBAL/CLAUDE.md" >/dev/null 2>&1; then
-  cp -f "$REPO/CLAUDE.md" "$GLOBAL/CLAUDE.md"
-  echo "CLAUDE.md 업데이트"
-fi
+# CLAUDE.md는 통복사 금지 — 배포본에 레포에 없는 내용(OMC 섹션, 수기 지침 등)이
+# 섞여 있으면 덮어쓰기로 소실된다. install.sh와 같은 병합 스크립트를 쓴다(백업 자동 생성).
+PY="$(command -v python3 || command -v python)"
+"$PY" "$REPO/scripts/merge-claude-md.py" "$GLOBAL/CLAUDE.md" "$REPO/CLAUDE.md"
 ```
 
 ### Step 5 — Git 커밋 & Push
@@ -91,6 +90,7 @@ STAGE_PATHS=(
   "agents"
   "commands"
   "skills"
+  "scripts"
   "mcp-server"
   "CHANGELOG.md"
   "CLAUDE.md"
